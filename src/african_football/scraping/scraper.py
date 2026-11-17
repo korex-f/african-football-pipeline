@@ -14,16 +14,216 @@ Typical usage:
 
 import asyncio
 import random
+import re
 from datetime import datetime
 from typing import Any, Optional
 
-from playwright.async_api import Browser, Page, async_playwright
+from playwright.async_api import (
+    Browser,
+    Page,
+    TimeoutError as PlaywrightTimeoutError,
+    async_playwright,
+)
 
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord
 from african_football.utils.logger import PipelineLogger
 
-PIPELINE_VERSION = "1.0.0"
+PIPELINE_VERSION = "1.0.1"
+
+BASE_URL = "https://ng.soccerway.com"
+
+# ---------------------------------------------------------------------------
+# Selectors
+#
+# Soccerway uses the Flashscore frontend. Its utility class names contain a
+# build hash, for example 'wcl-name_jjfMf'. The hash changes at each release.
+# Thus, these selectors use only stable attributes:
+#   - BEM classes, for example 'event__*'
+#   - data-testid attributes
+#   - class prefixes without a hash, with [class*=...]
+# Keep all selectors in this block. If the site changes, you then change
+# only this block.
+# ---------------------------------------------------------------------------
+STAGE_HEADER = "div.headerLeague__wrapper"
+STAGE_TITLE = ".headerLeague__title-text"
+MATCH_ROW = "div.event__match"
+SHOW_MORE_BUTTON = "[data-testid='wcl-buttonLink']:has-text('Show more matches')"
+HALFTIME_SCORE = (
+    "[data-testid='wcl-overline-02']:text-is('1st Half')"
+    " >> xpath=following-sibling::span[1]"
+)
+
+# Indicator texts that show an awarded result. The teams did not play.
+AWARDED_INDICATORS = {"awrd", "wo"}
+
+_SCORE_PATTERN = re.compile(r"^\d+\s*-\s*\d+$")
+
+# Write a progress line after this number of match pages in the halftime step.
+HALFTIME_PROGRESS_INTERVAL = 15
+
+# Maximum time (milliseconds) to wait for the halftime score on a match page.
+HALFTIME_WAIT_MS = 15000
+
+# Read the sibling elements that follow the stage header at `idx`.
+# Return the round markers and the match rows in the sequence of the page.
+EXTRACT_STAGE_JS = """
+(idx) => {
+    const text = (root, sel) => {
+        const el = root.querySelector(sel);
+        return el ? el.textContent.trim() : null;
+    };
+    // The main score is the direct text of the element.
+    // The penalty shootout score is in a <sup> child, for example 0<sup>(3)</sup>.
+    const score = (row, side) => {
+        const el = row.querySelector('.event__score--' + side);
+        if (!el) return { main: null, pen: null };
+        let main = '';
+        el.childNodes.forEach(n => {
+            if (n.nodeType === Node.TEXT_NODE) main += n.textContent;
+        });
+        const sup = el.querySelector('sup');
+        return {
+            main: main.trim() || null,
+            pen: sup ? sup.textContent.replace(/[()]/g, '').trim() : null,
+        };
+    };
+
+    const headers = Array.from(
+        document.querySelectorAll('div.headerLeague__wrapper')
+    );
+    const next = headers[idx + 1];
+    const out = [];
+    let el = headers[idx].nextElementSibling;
+
+    while (el && el !== next) {
+        if (el.classList.contains('event__round')) {
+            out.push({ type: 'round', text: el.textContent.trim() });
+        } else if (el.classList.contains('event__match')) {
+            const home = score(el, 'home');
+            const away = score(el, 'away');
+            const link = el.querySelector('a.eventRowLink');
+            out.push({
+                type: 'match',
+                id: el.id,
+                date: text(el, '[data-testid="wcl-stageTime"] [class*="wcl-dateContent"]'),
+                indicator: text(el, '[data-testid="wcl-stageTime"] [class*="wcl-stageContent"]'),
+                home_team: text(el, '.event__homeParticipant [class*="wcl-name"]'),
+                away_team: text(el, '.event__awayParticipant [class*="wcl-name"]'),
+                home_score: home.main,
+                away_score: away.main,
+                home_pen: home.pen,
+                away_pen: away.pen,
+                link: link ? link.getAttribute('href') : null,
+            });
+        }
+        el = el.nextElementSibling;
+    }
+    return out;
+}
+"""
+
+
+def _clean_score(value: Optional[str]) -> Optional[str]:
+    """Return the score if it is a number. If not (for example '-'), return None."""
+    if value is None:
+        return None
+    value = value.strip()
+    return value if value.isdigit() else None
+
+
+def parse_round(round_text: str) -> Optional[int]:
+    """
+    Get the round number from a round header, for example 'Round 12'.
+
+    Args:
+        round_text: The text of the round header.
+
+    Returns:
+        The round number. For a round with a name (for example
+        'Semi-finals'), return None.
+    """
+    lowered = round_text.lower()
+    if "round" not in lowered:
+        return None
+    num_str = lowered.replace("round", "").strip()
+    return int(num_str) if num_str.isdigit() else None
+
+
+def parse_match_row(
+    row: dict[str, Any],
+    round_name: Optional[str],
+    round_number: Optional[int],
+    stage_name: str,
+) -> Optional[dict[str, Any]]:
+    """
+    Make a match record from a raw row that EXTRACT_STAGE_JS returns.
+
+    This is a pure function. It does not use a browser. Thus, unit tests
+    can test it with saved page fixtures.
+
+    The TXT export of file_saver uses these score rules:
+        - Regular or awarded match: home_score and away_score contain
+          the final score.
+        - Penalty shootout: home_score and away_score contain the
+          shootout score. full_time_score contains the score before
+          the penalties.
+
+    Args:
+        row:          The raw match row from EXTRACT_STAGE_JS.
+        round_name:   The name of the current round.
+        round_number: The number of the current round, or None.
+        stage_name:   The name of the current stage.
+
+    Returns:
+        A match dictionary. If a necessary field is missing, return None.
+    """
+    home, away = row.get("home_team"), row.get("away_team")
+    home_score = _clean_score(row.get("home_score"))
+    away_score = _clean_score(row.get("away_score"))
+    indicator = (row.get("indicator") or "").strip().lower()
+    is_awarded = indicator in AWARDED_INDICATORS
+
+    if not home or not away:
+        return None
+    # A walkover can have no score ('-'). All other matches must have a score.
+    if (home_score is None or away_score is None) and not is_awarded:
+        return None
+
+    link = row.get("link")
+    url = f"{BASE_URL}{link}" if link and not link.startswith("http") else link
+    home_pen = _clean_score(row.get("home_pen"))
+    away_pen = _clean_score(row.get("away_pen"))
+
+    match: dict[str, Any] = {
+        "stage": stage_name,
+        "round": round_name,
+        "round_number": round_number,
+        "date": (row.get("date") or "").strip(),
+        "home_team": home.strip(),
+        "away_team": away.strip(),
+        "home_score": home_score,
+        "away_score": away_score,
+        "half_time_score": None,
+        "match_url": url,
+        "awarded": False,
+        "awarded_reason": None,
+        "full_time_score": None,
+        "penalty_shootout": False,
+        "penalty_winner": None,
+    }
+
+    if is_awarded:
+        match["awarded"] = True
+        match["awarded_reason"] = "walkover"
+    elif home_pen is not None and away_pen is not None:
+        match["full_time_score"] = f"{home_score}-{away_score}"
+        match["home_score"] = home_pen
+        match["away_score"] = away_pen
+        match["penalty_shootout"] = True
+        match["penalty_winner"] = "home" if int(home_pen) > int(away_pen) else "away"
+
+    return match
 
 
 class FootballScraper:
@@ -199,20 +399,31 @@ class FootballScraper:
             page: The Playwright page loaded at the season results URL.
         """
         clicks = 0
+        rows = page.locator(MATCH_ROW)
         while True:
             try:
-                btn = page.locator("a.wclButtonLink:has-text('Show more matches')")
+                btn = page.locator(SHOW_MORE_BUTTON)
                 if await btn.count() == 0:
                     break
-                await btn.scroll_into_view_if_needed()
+                before = await rows.count()
+                await btn.first.scroll_into_view_if_needed()
                 await asyncio.sleep(random.uniform(1, 2))
-                await btn.click()
+                await btn.first.click()
                 clicks += 1
                 await asyncio.sleep(random.uniform(2, 4))
+                # Stop if the button stays visible but loads no new matches.
+                if await rows.count() <= before:
+                    self.logger.log(
+                        "'Show more' click loaded no new matches; stopping",
+                        level="WARNING",
+                    )
+                    break
             except Exception as e:
                 self.logger.log(f"Error clicking show more: {e}", level="INFO")
                 break
-        self.logger.log(f"Loaded all matches ({clicks} clicks)", level="SUCCESS")
+        self.logger.log(
+            f"Loaded {await rows.count()} matches ({clicks} clicks)", level="SUCCESS"
+        )
 
     async def _extract_all_stages(self, page: Page) -> list[dict[str, Any]]:
         """
@@ -229,74 +440,21 @@ class FootballScraper:
             A list of stage dictionaries each containing stage_name,
             total_rounds, total_matches, and matches.
         """
-        headers = await page.locator("div.headerLeague__wrapper").all()
+        headers = await page.locator(STAGE_HEADER).all()
         self.logger.log(f"Found {len(headers)} stage(s)")
         stages_data = []
 
         for idx, header in enumerate(headers):
             try:
-                name_elem = header.locator(".headerLeague__title-text")
+                name_elem = header.locator(STAGE_TITLE)
                 stage_name = (
                     await name_elem.inner_text()
                     if await name_elem.count() > 0
                     else f"Stage {idx + 1}"
                 ).strip()
 
-                elements = await page.evaluate(
-                    """
-                    (idx) => {
-                        const headers = Array.from(
-                            document.querySelectorAll('div.headerLeague__wrapper')
-                        );
-                        const current = headers[idx];
-                        const next = headers[idx + 1];
-                        const matches = [];
-                        let element = current.nextElementSibling;
-
-                        while (element && element !== next) {
-                            if (element.classList.contains('event__round')) {
-                                matches.push({
-                                    type: 'round',
-                                    text: element.textContent.trim()
-                                });
-                            } else if (element.classList.contains('event__match')) {
-                                const matchId = element.id;
-                                const stageBlock = element.querySelector(
-                                    '.event__stage--block'
-                                );
-                                const hasStageIndicator = stageBlock !== null;
-                                const stageIndicatorText = hasStageIndicator
-                                    ? stageBlock.textContent.trim()
-                                    : null;
-                                const ftScores = element.querySelectorAll(
-                                    '.event__part'
-                                );
-                                const ftHome = ftScores.length >= 2
-                                    ? ftScores[0].textContent.trim()
-                                    : null;
-                                const ftAway = ftScores.length >= 2
-                                    ? ftScores[1].textContent.trim()
-                                    : null;
-                                matches.push({
-                                    type: 'match',
-                                    id: matchId,
-                                    hasStageIndicator: hasStageIndicator,
-                                    stageIndicatorText: stageIndicatorText,
-                                    ftHome: ftHome,
-                                    ftAway: ftAway
-                                });
-                            }
-                            element = element.nextElementSibling;
-                        }
-                        return matches;
-                    }
-                    """,
-                    idx,
-                )
-
-                stage_matches = await self._extract_stage_matches(
-                    page, elements, stage_name
-                )
+                elements = await page.evaluate(EXTRACT_STAGE_JS, idx)
+                stage_matches = self._build_stage_matches(elements, stage_name)
 
                 if stage_matches:
                     round_numbers: list[int] = [
@@ -327,23 +485,20 @@ class FootballScraper:
 
         return stages_data
 
-    async def _extract_stage_matches(
+    def _build_stage_matches(
         self,
-        page: Page,
         elements: list[dict[str, Any]],
         stage_name: str,
     ) -> list[dict[str, Any]]:
         """
-        Extract individual matches from a list of stage elements.
+        Make the match records for one stage from its round and match elements.
 
-        Tracks the current round as elements are processed in order.
-        Round elements update the current round context, match elements
-        are extracted using that context.
+        A round element sets the current round. The function parses each
+        match element with the current round.
 
         Args:
-            page:       The Playwright page.
-            elements:   List of element descriptors from JS evaluation.
-            stage_name: Name of the current stage for match metadata.
+            elements:   The elements from EXTRACT_STAGE_JS, in page sequence.
+            stage_name: The name of the current stage.
 
         Returns:
             A list of match dictionaries for this stage.
@@ -354,124 +509,21 @@ class FootballScraper:
 
         for element in elements:
             if element["type"] == "round":
-                round_text = element["text"]
-                current_round_name = round_text
-                try:
-                    if "round" in round_text.lower():
-                        num_str = round_text.lower().replace("round", "").strip()
-                        current_round_number = (
-                            int(num_str) if num_str.isdigit() else None
-                        )
-                    else:
-                        current_round_number = None
-                except (ValueError, AttributeError):
-                    current_round_number = None
-
+                current_round_name = element["text"]
+                current_round_number = parse_round(element["text"])
             elif element["type"] == "match":
-                match = await self._extract_single_match(
-                    page.locator(f"#{element['id']}"),
-                    current_round_name,
-                    current_round_number,
-                    stage_name,
-                    element.get("stageIndicatorText"),
-                    element.get("ftHome"),
-                    element.get("ftAway"),
+                match = parse_match_row(
+                    element, current_round_name, current_round_number, stage_name
                 )
                 if match:
                     matches.append(match)
+                else:
+                    self.logger.log(
+                        f"Skipping unparseable match row {element.get('id')}",
+                        level="WARNING",
+                    )
 
         return matches
-
-    async def _extract_single_match(
-        self,
-        element: Any,
-        round_name: Optional[str],
-        round_number: Optional[int],
-        stage_name: str,
-        stage_indicator: Optional[str] = None,
-        ft_home: Optional[str] = None,
-        ft_away: Optional[str] = None,
-    ) -> Optional[dict[str, Any]]:
-        """
-        Extract data from a single match row element.
-
-        Args:
-            element:         Playwright locator for the match element.
-            round_name:      Current round display name.
-            round_number:    Current round number for sorting, or None.
-            stage_name:      Current stage name.
-            stage_indicator: Text from the stage indicator block, e.g.
-                             'Awrd' for awarded, 'pen.' for penalties,
-                             or None for regular matches.
-            ft_home:         Full-time home score before penalties, or None.
-            ft_away:         Full-time away score before penalties, or None.
-
-        Returns:
-            A match dictionary or None if extraction fails.
-        """
-        try:
-            home = await element.locator(
-                ".event__homeParticipant .wcl-name_jjfMf"
-            ).inner_text()
-            away = await element.locator(
-                ".event__awayParticipant .wcl-name_jjfMf"
-            ).inner_text()
-            home_score = await element.locator(".event__score--home").inner_text()
-            away_score = await element.locator(".event__score--away").inner_text()
-            raw_date = await element.locator("div.event__time").inner_text()
-            date = raw_date.split("\n")[0].strip()
-            link = await element.locator("a.eventRowLink").first.get_attribute("href")
-            url = (
-                f"https://ng.soccerway.com{link}"
-                if link and not link.startswith("http")
-                else link
-            )
-
-            match_data: dict[str, Any] = {
-                "stage": stage_name,
-                "round": round_name,
-                "round_number": round_number,
-                "date": date.strip(),
-                "home_team": home.strip(),
-                "away_team": away.strip(),
-                "home_score": home_score.strip(),
-                "away_score": away_score.strip(),
-                "half_time_score": None,
-                "match_url": url,
-            }
-
-            indicator = stage_indicator.lower() if stage_indicator else None
-
-            if indicator == "awrd":
-                # Awarded match
-                match_data["awarded"] = True
-                match_data["awarded_reason"] = "walkover"
-                match_data["penalty_shootout"] = False
-                match_data["penalty_winner"] = None
-                match_data["full_time_score"] = None
-
-            elif indicator and ft_home is not None and ft_away is not None:
-                # Penalty shootout
-                match_data["awarded"] = False
-                match_data["awarded_reason"] = None
-                match_data["full_time_score"] = f"{ft_home}-{ft_away}"
-                match_data["penalty_shootout"] = True
-                match_data["penalty_winner"] = (
-                    "home" if home_score > away_score else "away"
-                )
-            else:
-                # Regular Match
-                match_data["awarded"] = False
-                match_data["awarded_reason"] = None
-                match_data["full_time_score"] = None
-                match_data["penalty_shootout"] = False
-                match_data["penalty_winner"] = None
-
-            return match_data
-
-        except Exception as e:
-            self.logger.log(f"Error extracting match: {e}", level="WARNING")
-            return None
 
     async def _enrich_matches(
         self,
@@ -557,7 +609,8 @@ class FootballScraper:
             List of (index, match) tuples that failed and need retry.
         """
         failed = []
-        for _, (idx, m) in enumerate(matches_list, 1):
+        total = len(matches_list)
+        for count, (idx, m) in enumerate(matches_list, 1):
             try:
                 await asyncio.sleep(random.uniform(1, 2))
                 ht = await self._get_halftime_score(page, m["match_url"])
@@ -569,6 +622,13 @@ class FootballScraper:
                 if "timeout" in str(e).lower() or "network" in str(e).lower():
                     self.stats["network_errors"] += 1
                 failed.append((idx, m))
+
+            # Show progress at each interval and at the last match.
+            if count % HALFTIME_PROGRESS_INTERVAL == 0 or count == total:
+                self.logger.log(
+                    f"Halftime pass {pass_num}: {count}/{total} matches done, "
+                    f"{len(failed)} failed"
+                )
         return failed
 
     async def _get_halftime_score(self, page: Page, url: str) -> Optional[str]:
@@ -582,14 +642,16 @@ class FootballScraper:
         Returns:
             The halftime score string e.g. '1-0', or None if not found.
         """
-        await page.goto(url, timeout=30000)
-        await page.wait_for_load_state("networkidle")
-        loc = (
-            page.locator("span:has-text('1st Half')")
-            .locator("xpath=following-sibling::span//div")
-            .first
-        )
-        return (await loc.inner_text()).strip() if await loc.count() > 0 else None
+        # Do not wait for the full page load. Ads and trackers can keep the
+        # page busy for more than 30 seconds. Wait only for the halftime score.
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        loc = page.locator(HALFTIME_SCORE).first
+        try:
+            await loc.wait_for(timeout=HALFTIME_WAIT_MS)
+        except PlaywrightTimeoutError:
+            return None
+        text = (await loc.inner_text()).strip()
+        return text if _SCORE_PATTERN.match(text) else None
 
     def validate_data(self, matches: list[dict[str, Any]]) -> None:
         """

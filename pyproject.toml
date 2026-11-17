@@ -1,7 +1,7 @@
 [project]
 name = "african-football-leagues-pipeline"
 version = "1.0.0"
-description = "African football data pipeline — raw scraper to warehouse to lakehouse. Three-phase DE portfolio project."
+description = "Multi-source historical data pipeline for African domestic football leagues."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
