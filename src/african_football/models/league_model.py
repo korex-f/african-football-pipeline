@@ -19,6 +19,9 @@ class LeagueConfig:
         country: Country slug as it appears in Soccerway URLs (e.g. 'nigeria').
         slug: League slug as it appears in Soccerway URLs (e.g. 'npfl').
         fetch_halftime: Whether halftime scores are available for this league.
+        timezone:       The IANA timezone of the league, for example
+                        'Africa/Accra'. The scraper shows all dates and
+                        kick-off times in this timezone.
         fetch_venue:     Whether to scrape match venue (stadium). Defaults to False.
         fetch_lineups:   Whether to scrape match lineups. Defaults to False.
         fetch_scorers:   Whether to scrape goalscorers. Defaults to False.
@@ -30,6 +33,7 @@ class LeagueConfig:
     country: str
     slug: str
     fetch_halftime: bool
+    timezone: str
     submission_code: str = ""
     fetch_venue: bool = False
     fetch_lineups: bool = False

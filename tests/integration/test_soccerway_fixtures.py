@@ -21,9 +21,11 @@ from playwright.async_api import async_playwright
 from african_football.scraping.scraper import (
     EXTRACT_STAGE_JS,
     HALFTIME_SCORE,
+    KICKOFF_TIME,
     SHOW_MORE_BUTTON,
     STAGE_HEADER,
     STAGE_TITLE,
+    parse_kickoff,
     parse_match_row,
     parse_round,
 )
@@ -117,3 +119,10 @@ def test_halftime_score_selector():
         return (await page.locator(HALFTIME_SCORE).first.inner_text()).strip()
 
     assert asyncio.run(_with_page("match_page.html", read)) == "2 - 1"
+
+
+def test_kickoff_selector():
+    async def read(page):
+        return parse_kickoff(await page.locator(KICKOFF_TIME).first.inner_text())
+
+    assert asyncio.run(_with_page("match_page.html", read)) == "23.06.2024 16:00"

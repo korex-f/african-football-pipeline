@@ -57,7 +57,11 @@ HALFTIME_SCORE = (
 # Indicator texts that show an awarded result. The teams did not play.
 AWARDED_INDICATORS = {"awrd", "wo"}
 
+# The kick-off date and time on a match page, for example '15.09.2023 19:30'.
+KICKOFF_TIME = ".duelParticipant__startTime"
+
 _SCORE_PATTERN = re.compile(r"^\d+\s*-\s*\d+$")
+_KICKOFF_PATTERN = re.compile(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$")
 
 # Write a progress line after this number of match pages in the halftime step.
 HALFTIME_PROGRESS_INTERVAL = 15
@@ -130,6 +134,23 @@ def _clean_score(value: Optional[str]) -> Optional[str]:
         return None
     value = value.strip()
     return value if value.isdigit() else None
+
+
+def parse_kickoff(text: Optional[str]) -> Optional[str]:
+    """
+    Get the kick-off date and time from the text of a match page.
+
+    Args:
+        text: The kick-off text, for example '15.09.2023 19:30'.
+
+    Returns:
+        The kick-off as 'DD.MM.YYYY HH:MM'. If the text does not have
+        this format, return None.
+    """
+    if text is None:
+        return None
+    text = " ".join(text.split())
+    return text if _KICKOFF_PATTERN.match(text) else None
 
 
 def parse_round(round_text: str) -> Optional[int]:
@@ -326,7 +347,8 @@ class FootballScraper:
         )
         self.logger.log(f"Loading: {self.season.url}")
 
-        page = await self._browser.new_page()
+        # Show dates and kick-off times in the local timezone of the league.
+        page = await self._browser.new_page(timezone_id=self.league.timezone)
 
         try:
             await page.goto(self.season.url, timeout=60000)
@@ -613,7 +635,11 @@ class FootballScraper:
         for count, (idx, m) in enumerate(matches_list, 1):
             try:
                 await asyncio.sleep(random.uniform(1, 2))
-                ht = await self._get_halftime_score(page, m["match_url"])
+                ht, kickoff = await self._get_match_details(page, m["match_url"])
+                # The results page shows only the date. The match page also
+                # shows the kick-off time.
+                if kickoff:
+                    m["date"] = kickoff
                 if ht:
                     m["half_time_score"] = ht
                 elif pass_num == 1:
@@ -631,27 +657,38 @@ class FootballScraper:
                 )
         return failed
 
-    async def _get_halftime_score(self, page: Page, url: str) -> Optional[str]:
+    async def _get_match_details(
+        self, page: Page, url: str
+    ) -> tuple[Optional[str], Optional[str]]:
         """
-        Fetch the halftime score from an individual match page.
+        Get the halftime score and the kick-off from one match page.
 
         Args:
             page: The Playwright page for navigation.
-            url:  The match page URL to fetch.
+            url:  The URL of the match page.
 
         Returns:
-            The halftime score string e.g. '1-0', or None if not found.
+            A tuple (halftime_score, kickoff). The halftime score has the
+            format '1 - 0'. The kick-off has the format 'DD.MM.YYYY HH:MM'.
+            If a value is not found, it is None.
         """
         # Do not wait for the full page load. Ads and trackers can keep the
         # page busy for more than 30 seconds. Wait only for the halftime score.
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        loc = page.locator(HALFTIME_SCORE).first
+        ht_loc = page.locator(HALFTIME_SCORE).first
         try:
-            await loc.wait_for(timeout=HALFTIME_WAIT_MS)
+            await ht_loc.wait_for(timeout=HALFTIME_WAIT_MS)
+            ht_text = (await ht_loc.inner_text()).strip()
+            ht = ht_text if _SCORE_PATTERN.match(ht_text) else None
         except PlaywrightTimeoutError:
-            return None
-        text = (await loc.inner_text()).strip()
-        return text if _SCORE_PATTERN.match(text) else None
+            ht = None
+
+        # The page header loads before the halftime block. Thus, do not wait.
+        kickoff_loc = page.locator(KICKOFF_TIME).first
+        kickoff = None
+        if await kickoff_loc.count() > 0:
+            kickoff = parse_kickoff(await kickoff_loc.inner_text())
+        return ht, kickoff
 
     def validate_data(self, matches: list[dict[str, Any]]) -> None:
         """
