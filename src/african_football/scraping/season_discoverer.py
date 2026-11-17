@@ -101,7 +101,7 @@ class SeasonDiscoverer:
             f"Discovering seasons for {self.league.name} from {archive_url}"
         )
 
-        page = await self._browser.new_page()
+        page = await self._browser.new_page(timezone_id=self.league.timezone)
 
         try:
             await page.goto(archive_url, timeout=70000)

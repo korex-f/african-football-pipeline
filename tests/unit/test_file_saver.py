@@ -52,6 +52,7 @@ class TestBuilTxtPath:
             country="ghana",
             slug="premier-league",
             fetch_halftime=True,
+            timezone="Africa/Accra",
             submission_code="gh1",
         )
         path = _build_txt_path(league, 2009, 2010, tmp_path)

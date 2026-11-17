@@ -7,6 +7,7 @@ DAG parsing lightweight.
 """
 
 import asyncio
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -39,21 +40,8 @@ def load_all_league_configs() -> list[dict]:
     """Load all league configs from YAML as serialisable dicts."""
 
     leagues = load_leagues(CONFIG_PATH)
-    return [
-        {
-            "code": league.code,
-            "name": league.name,
-            "country": league.country,
-            "slug": league.slug,
-            "fetch_halftime": league.fetch_halftime,
-            "submission_code": league.submission_code,
-            "fetch_venue": league.fetch_venue,
-            "fetch_lineups": league.fetch_lineups,
-            "fetch_scorers": league.fetch_scorers,
-            "fetch_cards": league.fetch_cards,
-        }
-        for league in leagues
-    ]
+    # asdict() includes all fields. Thus, a new LeagueConfig field is not lost.
+    return [asdict(league) for league in leagues]
 
 
 def discover_and_build_jobs(league_configs: list[dict]) -> list[dict]:

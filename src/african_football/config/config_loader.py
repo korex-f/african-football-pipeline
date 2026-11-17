@@ -11,6 +11,7 @@ Typical usage:
 """
 
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -77,9 +78,10 @@ def _parse_league_entry(entry: dict) -> LeagueConfig:
         A validated LeagueConfig object.
 
     Raises:
-        ValueError: If any required field is missing from the entry.
+        ValueError: If any required field is missing from the entry, or if
+                    the timezone is not a known IANA timezone.
     """
-    required_fields = ["code", "name", "country", "slug", "fetch_halftime"]
+    required_fields = ["code", "name", "country", "slug", "fetch_halftime", "timezone"]
     missing = [field for field in required_fields if field not in entry]
 
     if missing:
@@ -87,12 +89,22 @@ def _parse_league_entry(entry: dict) -> LeagueConfig:
             f"League entry is missing required fields: {missing}Entry received: {entry}"
         )
 
+    # Soccerway shows times in the timezone of the browser. An incorrect
+    # timezone gives incorrect times. Thus, stop if the timezone is not known.
+    try:
+        ZoneInfo(entry["timezone"])
+    except (ZoneInfoNotFoundError, ValueError) as e:
+        raise ValueError(
+            f"League '{entry['code']}' has an unknown timezone: {entry['timezone']!r}"
+        ) from e
+
     return LeagueConfig(
         code=entry["code"],
         name=entry["name"],
         country=entry["country"],
         slug=entry["slug"],
         fetch_halftime=entry["fetch_halftime"],
+        timezone=entry["timezone"],
         submission_code=entry.get("submission_code", ""),
         fetch_venue=entry.get("fetch_venue", False),
         fetch_lineups=entry.get("fetch_lineups", False),

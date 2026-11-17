@@ -297,6 +297,7 @@ class TestSelectionWithModels:
                 country="nigeria",
                 slug="npfl",
                 fetch_halftime=True,
+                timezone="Africa/Lagos",
                 submission_code="ng1",
             ),
             LeagueConfig(
@@ -305,6 +306,7 @@ class TestSelectionWithModels:
                 country="ghana",
                 slug="premier-league",
                 fetch_halftime=False,
+                timezone="Africa/Accra",
                 submission_code="gh1",
             ),
             LeagueConfig(
@@ -313,6 +315,7 @@ class TestSelectionWithModels:
                 country="egypt",
                 slug="premier-league",
                 fetch_halftime=False,
+                timezone="Africa/Cairo",
                 submission_code="eg1",
             ),
         ]
@@ -329,6 +332,7 @@ class TestSelectionWithModels:
                 country="nigeria",
                 slug="npfl",
                 fetch_halftime=True,
+                timezone="Africa/Lagos",
                 submission_code="ng1",
             ),
             LeagueConfig(
@@ -337,6 +341,7 @@ class TestSelectionWithModels:
                 country="ghana",
                 slug="premier-league",
                 fetch_halftime=False,
+                timezone="Africa/Accra",
                 submission_code="gh1",
             ),
             LeagueConfig(
@@ -345,6 +350,7 @@ class TestSelectionWithModels:
                 country="egypt",
                 slug="premier-league",
                 fetch_halftime=False,
+                timezone="Africa/Cairo",
                 submission_code="eg1",
             ),
         ]
