@@ -119,6 +119,7 @@ def test_load_detects_damaged_file(store):
     with pytest.raises(RawStoreError):
         store.load(doc)
 
+
 def test_load_detects_damaged_file_that_is_not_gzip(store):
     doc = store.save(URL, "results.html", HTML, TZ)
     (store.folder / doc.path).write_bytes(b"not gzip")
