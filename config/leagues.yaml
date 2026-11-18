@@ -1,6 +1,7 @@
 # config/leagues.yaml
 # League definitions for the African football pipeline.
-# Required fields: code, name, country, slug, fetch_halftime
+# Required fields: code, name, country, slug, fetch_halftime, timezone
+# timezone: IANA name, for example Africa/Lagos. Dates and kick-off times use it.
 # Optional flags default to false if omitted.
 
 leagues:
@@ -9,6 +10,7 @@ leagues:
     country: nigeria
     slug: npfl
     fetch_halftime: true
+    timezone: Africa/Lagos
     submission_code: ng1
 
   - code: nnl
@@ -16,6 +18,7 @@ leagues:
     country: nigeria
     slug: nnl
     fetch_halftime: false
+    timezone: Africa/Lagos
     submission_code: ng2
 
   - code: gh_pl
@@ -23,6 +26,7 @@ leagues:
     country: ghana
     slug: premier-league
     fetch_halftime: true
+    timezone: Africa/Accra
     submission_code: gh1
 
   - code: eg_pl
@@ -30,4 +34,5 @@ leagues:
     country: egypt
     slug: premier-league
     fetch_halftime: true
+    timezone: Africa/Cairo
     submission_code: eg1

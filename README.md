@@ -223,12 +223,12 @@ Season-level retry with backoff: attempt 1 (immediate) → attempt 2 (10s delay)
 
 ## Currently Supported Leagues
 
-| Country | League | Code | Submission Code |
-|---------|--------|------|-----------------|
-| Nigeria | Nigeria Professional Football League | npfl | ng1 |
-| Nigeria | Nigeria National League | nnl | ng2 |
-| Ghana | Ghana Premier League | gh_pl | gh1 |
-| Egypt | Egypt Premier League | eg_pl | eg1 |
+| Country | League | Code | Submission Code | Timezone |
+|---------|--------|------|-----------------|----------|
+| Nigeria | Nigeria Professional Football League | npfl | ng1 | Africa/Lagos |
+| Nigeria | Nigeria National League | nnl | ng2 | Africa/Lagos |
+| Ghana | Ghana Premier League | gh_pl | gh1 | Africa/Accra |
+| Egypt | Egypt Premier League | eg_pl | eg1 | Africa/Cairo |
 
 Adding a new league:
 
@@ -239,8 +239,11 @@ Adding a new league:
   country: south-africa
   slug: premier-division
   fetch_halftime: true
+  timezone: Africa/Johannesburg
   submission_code: sa1
 ```
+
+The `timezone` field is necessary. It must be an IANA timezone name. The scraper shows all dates and kick-off times in this timezone. If the field is missing or the name is not known, the pipeline stops when it loads the configuration.
 
 ## Architecture Decisions
 
@@ -302,6 +305,27 @@ The project made these decisions in November 2026. At that time, the pipeline st
 - **How (planned, roadmap step 5):** For a double round-robin league with *n* teams, the default expected number of matches is *n × (n − 1)*. The configuration can change this number for each season. Incomplete data never replaces verified data.
 
 ## Changelog
+
+### November 2026: Kick-off times in local league time
+
+**What happened:** After the Soccerway repair, the results page showed only the match date (`15.09.2023`). The kick-off time was not in the data.
+
+**Why it was necessary:** The kick-off time is useful data. During this work, the project also found a larger problem: Soccerway shows all dates and times in the timezone of the browser. Thus, the data changed with the computer that ran the scraper. For example, the same match showed 16:00 in Lagos, 15:00 in Accra and 18:00 in Cairo. All earlier data used West Africa Time (WAT), also for Ghana and Egypt. In a Docker container, the timezone is usually UTC, so Airflow runs gave different times again.
+
+**How the project changed it:**
+
+- Each league in `leagues.yaml` now has a necessary `timezone` field. The configuration loader stops if the field is missing or not known.
+- The scraper sets the browser timezone to the league timezone. Thus, all dates and kick-off times are in local league time on all computers.
+- The scraper reads the kick-off from the match page (`15.09.2023 18:30`). It uses the same page load as the halftime score, so there are no extra page loads.
+- The Airflow tasks now use `dataclasses.asdict()` for the league configuration. Before, a manual list of fields would lose new fields, for example `timezone`.
+
+**Limits:**
+
+- The scraper gets the kick-off time only for leagues with `fetch_halftime: true`. For other leagues, the data has the date only.
+- Awarded matches have the date only, because the scraper does not open their match pages.
+- The earlier JSON files contain WAT times. For Ghana and Egypt, these times are not local times. Scrape these seasons again to get the correct times.
+
+**Verification:** A live check used the scraper code and the league configuration. For Ghana, the kick-off times were one hour earlier than the earlier WAT data (for example 19:30 WAT became 18:30 Africa/Accra). This is correct. For Nigeria, the time did not change (16:00 Africa/Lagos), because WAT is the local time.
 
 ### November 2026: Soccerway scraper repair
 

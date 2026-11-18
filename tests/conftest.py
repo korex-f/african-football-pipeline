@@ -20,6 +20,7 @@ def nigeria_npfl() -> LeagueConfig:
         country="nigeria",
         slug="npfl",
         fetch_halftime=True,
+        timezone="Africa/Lagos",
         submission_code="ng1",
     )
 
@@ -33,6 +34,7 @@ def ghana_pl() -> LeagueConfig:
         country="ghana",
         slug="premier-league",
         fetch_halftime=False,
+        timezone="Africa/Accra",
         submission_code="gh1",
     )
 
@@ -48,6 +50,7 @@ def sample_league_yaml_data() -> dict:
                 "country": "nigeria",
                 "slug": "npfl",
                 "fetch_halftime": True,
+                "timezone": "Africa/Lagos",
                 "submission_code": "ng1",
             }
         ]

@@ -13,6 +13,7 @@ from african_football.models.season_model import SeasonRecord, SeasonStatus
 from african_football.scraping import scraper as scraper_module
 from african_football.scraping.scraper import (
     FootballScraper,
+    parse_kickoff,
     parse_match_row,
     parse_round,
 )
@@ -126,13 +127,13 @@ def test_halftime_progress_is_logged_at_each_interval(nigeria_npfl, monkeypatch)
     logger = _RecordingLogger()
     scraper = FootballScraper(nigeria_npfl, season, logger)  # type: ignore[arg-type]
 
-    async def fake_halftime(page, url):
-        return None if url.endswith("/7") else "1 - 0"
+    async def fake_details(page, url):
+        return (None, None) if url.endswith("/7") else ("1 - 0", None)
 
     async def no_sleep(_):
         return None
 
-    monkeypatch.setattr(scraper, "_get_halftime_score", fake_halftime)
+    monkeypatch.setattr(scraper, "_get_match_details", fake_details)
     monkeypatch.setattr(scraper_module.asyncio, "sleep", no_sleep)
 
     matches = [(i, {"match_url": f"https://example.invalid/{i}"}) for i in range(31)]
@@ -145,3 +146,47 @@ def test_halftime_progress_is_logged_at_each_interval(nigeria_npfl, monkeypatch)
         "Halftime pass 1: 31/31 matches done, 1 failed",
     ]
     assert len(failed) == 1
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("15.09.2023 19:30", "15.09.2023 19:30"),
+        ("  15.09.2023\n19:30 ", "15.09.2023 19:30"),
+        ("15.09.2023", None),
+        ("Postponed", None),
+        (None, None),
+    ],
+)
+def test_parse_kickoff(text, expected):
+    assert parse_kickoff(text) == expected
+
+
+def test_kickoff_from_match_page_replaces_date(nigeria_npfl, monkeypatch):
+    season = SeasonRecord(
+        season="2023/2024",
+        start_year=2023,
+        end_year=2024,
+        status=SeasonStatus.COMPLETED,
+        url="https://example.invalid/results/",
+    )
+    scraper = FootballScraper(nigeria_npfl, season, _RecordingLogger())  # type: ignore[arg-type]
+
+    async def fake_details(page, url):
+        if url.endswith("/0"):
+            return "1 - 0", "15.09.2023 19:30"
+        return "0 - 0", None
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(scraper, "_get_match_details", fake_details)
+    monkeypatch.setattr(scraper_module.asyncio, "sleep", no_sleep)
+
+    with_time = {"match_url": "https://example.invalid/0", "date": "15.09.2023"}
+    without_time = {"match_url": "https://example.invalid/1", "date": "16.09.2023"}
+    matches = [(0, with_time), (1, without_time)]
+    asyncio.run(scraper._fetch_halftime_scores(None, matches, 1))  # type: ignore[arg-type]
+
+    assert with_time["date"] == "15.09.2023 19:30"
+    assert without_time["date"] == "16.09.2023"

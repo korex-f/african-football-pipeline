@@ -66,6 +66,7 @@ class TestLoadLeagues:
                 "country": "ghana",
                 "slug": "premier-league",
                 "fetch_halftime": False,
+                "timezone": "Africa/Accra",
                 "submission_code": "gh1",
             }
         )
@@ -96,6 +97,30 @@ class TestLoadLeagues:
             load_leagues(config_file)
         # Error message should tell what is missing
         assert "missing required fields" in str(error.value)
+
+    def test_loads_timezone(self, tmp_path, sample_league_yaml_data):
+        config_file = write_yaml(tmp_path, sample_league_yaml_data)
+        assert load_leagues(config_file)[0].timezone == "Africa/Lagos"
+
+    def test_raises_value_error_for_missing_timezone(
+        self, tmp_path, sample_league_yaml_data
+    ):
+        del sample_league_yaml_data["leagues"][0]["timezone"]
+        config_file = write_yaml(tmp_path, sample_league_yaml_data)
+        with pytest.raises(ValueError, match="timezone"):
+            load_leagues(config_file)
+
+    def test_raises_value_error_for_unknown_timezone(
+        self, tmp_path, sample_league_yaml_data
+    ):
+        sample_league_yaml_data["leagues"][0]["timezone"] = "Africa/Atlantis"
+        config_file = write_yaml(tmp_path, sample_league_yaml_data)
+        with pytest.raises(ValueError, match="unknown timezone"):
+            load_leagues(config_file)
+
+    def test_real_config_has_valid_timezones(self):
+        for league in load_leagues("config/leagues.yaml"):
+            assert league.timezone.startswith("Africa/"), league.code
 
     def test_empty_leagues_list(self, tmp_path):
         config_file = write_yaml(tmp_path, {"leagues": []})
