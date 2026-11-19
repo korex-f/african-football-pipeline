@@ -125,6 +125,9 @@ uv sync
 
 # Install Playwright browser
 uv run playwright install chromium
+
+# Install the Git pre-commit hook (do this one time in each clone)
+uv run pre-commit install
 ```
 
 ### Running the Pipeline
@@ -173,6 +176,43 @@ uv run pytest tests/integration/ -v
 ```
 
 The Soccerway regression tests are in `tests/integration/test_soccerway_fixtures.py`. These tests run the selectors and the JavaScript of the scraper on saved HTML pages. They use a local headless Chromium browser. They do not use the network, but they need the Playwright browser installation. If Soccerway changes its pages, get new fixtures from the live site. Then, run these tests. The failed tests show which selector does not work.
+
+### Code Checks
+
+**Before each commit (pre-commit hook).** Git runs these checks when you do `git commit`. If a check fails, Git stops the commit. Some checks correct the files. Then, add the corrected files with `git add` and do the commit again.
+
+| Check | What it does |
+|-------|--------------|
+| `ruff check --fix` | Finds code errors. Corrects the errors that it can. |
+| `ruff format` | Formats the Python code. |
+| `check-yaml`, `check-toml` | Finds syntax errors in YAML and TOML files, for example `config/leagues.yaml`. |
+| `end-of-file-fixer`, `trailing-whitespace` | Removes spaces at line ends. Adds a newline at the end of each file. |
+| `check-merge-conflict` | Finds merge-conflict markers, for example `<<<<<<<`. |
+| `check-added-large-files` | Stops a commit that adds a large file. |
+
+The hooks do not change the files in `tests/fixtures/`. These files are copies of real pages, and the tests need them without changes.
+
+To run all checks on all files:
+
+```bash
+uv run pre-commit run --all-files
+```
+
+**On GitHub (CI).** GitHub Actions runs two jobs on each pull request and on each push to `main`:
+
+| Job | Steps | Time |
+|-----|-------|------|
+| `lint` | `ruff format --check`, `ruff check` | Approximately 20 seconds |
+| `test` | Install Chromium, then `pytest` | Approximately 1 minute |
+
+The two jobs run at the same time. The `lint` job does not install a browser, thus it gives a result quickly.
+
+The `test` job runs in the `mcr.microsoft.com/playwright/python` Docker image. This image contains the system packages that Chromium needs. Before, CI installed these packages with `apt-get`. On a slow day, the Ubuntu package server made this step take 9 minutes.
+
+**Version rules:**
+
+- The pre-commit hook, CI and your terminal use the same Ruff version: the version in `uv.lock`. The hook runs `uv run ruff`. It does not install a different Ruff.
+- The tag of the Docker image must agree with the Playwright version in `uv.lock`, for example `v1.65.1-noble` for Playwright 1.65.1. When you upgrade Playwright, change the tag in `.github/workflows/ci.yml` in the same pull request.
 
 ### Standalone Tools
 
@@ -387,10 +427,13 @@ At the end of each step, the pipeline works.
 | uv | Package management |
 | Playwright | Browser automation |
 | PyYAML | Configuration |
+| Pydantic | Checks the match records from the source parsers |
 | Apache Airflow | Orchestration (local Docker) |
 | PostgreSQL | Central database (planned, roadmap step 3) |
 | pytest | Testing framework |
 | Ruff | Linting and formatting |
+| pre-commit | Runs the checks before each commit |
+| GitHub Actions | CI: runs the checks and the tests on each pull request |
 | Pylance | Static type checking |
 
 ## License
