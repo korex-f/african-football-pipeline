@@ -202,12 +202,12 @@ uv run pre-commit run --all-files
 
 | Job | Steps | Time |
 |-----|-------|------|
-| `lint` | `ruff format --check`, `ruff check`, `basedpyright` | Approximately 30 seconds |
+| `lint` | `ruff format --check`, `ruff check`, `basedpyright` | Approximately 15 seconds |
 | `test` | Install Chromium, then `pytest` | Approximately 1 minute |
 
 The two jobs run at the same time. The `lint` job does not install a browser, thus it gives a result quickly.
 
-The type checker (`basedpyright`) runs only in CI, not in the pre-commit hook. It checks the full project, not only the changed files, and it takes approximately 16 seconds. A slow hook makes people skip it. Your editor shows the same type errors while you write the code (see the version rules below).
+The type checker (`basedpyright`) runs only in CI, not in the pre-commit hook. It checks the full project, not only the changed files, and it takes approximately 9 seconds on a laptop. A slow hook makes people skip it. Your editor shows the same type errors while you write the code (see the version rules below).
 
 To run the type checker in your terminal:
 
@@ -451,7 +451,7 @@ The project made these decisions in November 2026. At that time, the pipeline st
 
 **How:** See decision 12 and [Code Checks](#code-checks). The project corrected the 21 errors before it added the check. Thus, the check started with no errors.
 
-**Trade-offs:** The `lint` job takes approximately 20 seconds more. The type checker is not in the pre-commit hook, because it takes approximately 16 seconds.
+**Trade-offs:** The `lint` job takes approximately 4 seconds more. The type checker is not in the pre-commit hook, because it takes approximately 9 seconds on a laptop.
 
 ### November 2026: Source-neutral model and Python parser (roadmap step 2, parts 1 and 2)
 
