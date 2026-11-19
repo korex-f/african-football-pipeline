@@ -30,13 +30,22 @@ config/
 src/african_football/
 ├── models/
 │   ├── league_model.py           ← LeagueConfig dataclass with capability flags
-│   └── season_model.py           ← SeasonStatus enum + SeasonRecord (two-phase population)
+│   ├── season_model.py           ← SeasonStatus enum + SeasonRecord (two-phase population)
+│   └── source_match.py           ← SourceMatch: the match record of one source (Pydantic)
 ├── config/
 │   └── config_loader.py          ← YAML → validated LeagueConfig objects
 ├── scraping/
 │   ├── url_builder.py            ← URL construction + archive URL builder
 │   ├── season_discoverer.py      ← Discovers seasons + champions from archive pages
-│   └── scraper.py                ← Core Playwright scraper with HT enrichment
+│   └── scraper.py                ← FootballScraper: entry point (fetch → parse → export)
+├── sources/
+│   ├── base.py                   ← SourceAdapter Protocol + RawDocument
+│   ├── raw_store.py              ← RawStore: stored pages + manifest.json
+│   └── soccerway/
+│       ├── adapter.py            ← SoccerwayAdapter: fetch with Playwright, parse
+│       └── parser.py             ← Reads stored HTML with BeautifulSoup
+├── exports/
+│   └── legacy.py                 ← SourceMatch → the current JSON match format
 └── utils/
     ├── logger.py                 ← PipelineLogger (console + file)
     ├── file_saver.py             ← JSON/TXT export with SHA256 checksums
@@ -56,6 +65,7 @@ tests/
 └── fixtures/soccerway/           ← Trimmed copies of real Soccerway pages
 
 data/
+├── sources/{source}/{league}/{season}/ ← Raw pages (.html.gz) + manifest.json
 ├── raw/{country}/{league}/       ← Immutable JSON snapshots
 ├── exports/{country}/{league}/   ← Human-readable TXT exports
 └── logs/unmatched_teams/         ← Flagged names for manual curation
@@ -77,13 +87,13 @@ data/
 
 **Awarded match detection.** The scraper finds walkover matches from the stage indicator adjacent to the match date. Leagues show `Awrd` and cups show `WO`. The output marks these matches with `awarded: true`. The scraper does not get halftime scores for these matches, because the teams did not play.
 
-**Stable selectors in one location.** All Soccerway selectors are in one block at the top of `scraper.py`. The selectors use only stable attributes:
+**Stable selectors in two locations.** The Soccerway selectors are in two blocks. `sources/soccerway/adapter.py` has the selectors that the browser uses during `fetch` (the "Show more" button and the halftime score). `sources/soccerway/parser.py` has the selectors that read the stored pages. The selectors use only stable attributes:
 
 - BEM classes, for example `event__match`
 - `data-testid` attributes
 - Class prefixes without a hash, for example `[class*="wcl-name"]`
 
-The selectors do not use class names that contain a build hash, for example `wcl-name_jjfMf`. The site changes these names at each release. The scraper reads all match rows in one pass in the browser. A pure function (`parse_match_row`) parses each row. The unit tests test this function without a browser.
+The selectors do not use class names that contain a build hash, for example `wcl-name_jjfMf`. The site changes these names at each release. The browser only gets the pages. The parser reads the stored HTML in Python, thus the parser tests do not need a browser.
 
 ## Data Flow
 
@@ -94,10 +104,15 @@ leagues.yaml
 SeasonDiscoverer ──→ archive page ──→ list of SeasonRecords
     │                                   (status, URL, champion)
     ▼
-FootballScraper ──→ results page ──→ raw match data
-    │                                   (scores, dates, teams)
+FootballScraper
     │
-    ├──→ HT enrichment ──→ individual match pages ──→ halftime scores
+    ├──→ SoccerwayAdapter.fetch ──→ results page + match pages ──→ RawStore
+    │                                (Playwright)                   data/sources/...
+    │
+    ├──→ SoccerwayAdapter.parse ──→ stored pages ──→ SourceMatch records
+    │                                (BeautifulSoup, no network)
+    │
+    ├──→ legacy exporter ──→ match dictionaries in the current JSON format
     │
     ▼
 TeamNormalizer ──→ canonical YAML ──→ resolved team names
@@ -175,7 +190,13 @@ uv run pytest tests/unit/ -v
 uv run pytest tests/integration/ -v
 ```
 
-The Soccerway regression tests are in `tests/integration/test_soccerway_fixtures.py`. These tests run the selectors and the JavaScript of the scraper on saved HTML pages. They use a local headless Chromium browser. They do not use the network, but they need the Playwright browser installation. If Soccerway changes its pages, get new fixtures from the live site. Then, run these tests. The failed tests show which selector does not work.
+The Soccerway tests use saved pages in `tests/fixtures/soccerway/`. They do not use the network:
+
+- `tests/unit/test_soccerway_parser.py` tests the parser selectors. It does not need a browser.
+- `tests/integration/test_soccerway_fixtures.py` tests the two selectors that the browser uses during `fetch`. It needs the Playwright Chromium installation.
+- `tests/integration/test_soccerway_adapter.py` runs the real `fetch` code. Playwright stops each request of the browser and answers it with a fixture page (`page.route`). Thus, the tests examine page loads, the "Show more" loop, the halftime wait, retries and resume without a request to Soccerway.
+
+If Soccerway changes its pages, get new fixtures from the live site. Then, run these tests. The failed tests show which selector does not work.
 
 ### Code Checks
 
@@ -390,10 +411,11 @@ The project made these decisions in November 2026. At that time, the pipeline st
 - **How:**
   - The parser has three levels. Level 1 (`extract_stages`) gives exactly the same data as the JavaScript function. Level 2 adds the stage and the round to each row. Level 3 (`to_source_match`) converts the text to values and makes a `SourceMatch`.
   - A parity test runs the JavaScript and the Python parser on the same fixture pages. The two outputs must be equal. To make sure that the test can fail, the project broke the Python parser on purpose. The test found the error.
-  - The parser uses `html.parser`, which is part of Python. The pages come from a browser, thus the HTML is correct. Speed is not important for approximately 300 pages for each season.
+  - The parser uses `html.parser`, which is part of Python. The pages come from a browser, thus the HTML is correct.
 - **Trade-offs:**
   - Until roadmap step 2 is complete, two parsers exist. The parity test keeps them equal. When the old scraper is removed, the parity test is removed too.
-  - `lxml` is faster than `html.parser`, but it is one more dependency.
+  - Speed (measured in part 3b): a real match page has approximately 450 KB of HTML. The test fixture has 14 KB. `html.parser` takes approximately 150 ms for each real page, thus approximately 46 seconds for the 305 match pages of a season. The first version of this decision said that speed is not important. That statement came before a measurement on real pages.
+  - `lxml` took approximately 97 ms for each page and gave the same results. This is 1.5 times faster. The project did not add `lxml`, because the gain is small for one more dependency. Instead, the adapter parses each page one time only (see the changelog of part 3b).
 
 ### 10. The raw store keeps pages as files, with a manifest
 
@@ -410,7 +432,7 @@ The project made these decisions in November 2026. At that time, the pipeline st
   - The store rejects unsafe file names, for example names with `..`. The match IDs in the file names come from the web page, and the store must not trust them.
   - `has(url, timezone)` compares the timezone too. Soccerway shows times in the browser timezone. Thus, a page from a different timezone is different data.
 - **Trade-offs:**
-  - Disk space: an estimate is 10–30 MB for each season, compressed. The project has not measured this value yet. The `data/` folder is not in git.
+  - Disk space (measured): Ghana 2023/24 has 306 pages and uses 24 MB, compressed. The results page is 117 KB. The manifest is 99 KB. The `data/` folder is not in git.
   - The store writes the full manifest at each save. For approximately 300 pages in each season, this is fast.
   - In roadmap step 3, the page metadata can move from the manifest into PostgreSQL.
 
@@ -418,7 +440,7 @@ The project made these decisions in November 2026. At that time, the pipeline st
 
 - **What:** `SourceAdapter` is a `typing.Protocol` with `discover_seasons`, `fetch` (both async) and `parse`.
 - **Why:** An adapter does not inherit from a base class. A class that has these methods is an adapter. Thus, the adapters do not depend on a shared base module, and there is no class hierarchy. `fetch` uses the network, thus it is async. `parse` reads files only, thus it is not async.
-- **Trade-offs:** Python does not examine a Protocol when the program runs. Only a type checker finds an adapter with a wrong method. CI runs a type checker (basedpyright, see decision 12). But a type checker examines a Protocol only where the code uses it, for example `adapter: SourceAdapter = SoccerwayAdapter()`. At this time, no code uses `SourceAdapter`. A test proved this: a wrong return type in the Protocol gave no error. The real check starts with the Soccerway adapter (roadmap step 2, part 3).
+- **Trade-offs:** Python does not examine a Protocol when the program runs. Only a type checker finds an adapter with a wrong method. CI runs a type checker (basedpyright, see decision 12). But a type checker examines a Protocol only where the code uses it, for example `adapter: SourceAdapter = SoccerwayAdapter()`. Before part 3b, no code used `SourceAdapter`. A test proved this: a wrong return type in the Protocol gave no error. Now `FootballScraper` assigns the adapter to a variable of the type `SourceAdapter`. A test proved that the check works: with a wrong return type in `SoccerwayAdapter.parse`, basedpyright gave the error `Type "SoccerwayAdapter" is not assignable to declared type "SourceAdapter"`.
 
 ### 12. The type checker is basedpyright, in standard mode
 
@@ -453,7 +475,7 @@ The project made these decisions in November 2026. At that time, the pipeline st
   |---|---|---|
   | Part 2 | Python parser | `extract_stages` and `EXTRACT_STAGE_JS` give the same rows (Chromium) |
   | Part 3a | Legacy exporter | Parser, `SourceMatch` and exporter give the same dictionaries as `parse_match_row` (no browser) |
-  | Part 3b | Soccerway adapter | A live scrape gives the same JSON as a new baseline from the old scraper |
+  | Part 3b | Soccerway adapter | A live scrape gives the same JSON as a new baseline from the old scraper: 306 matches, 4,590 fields, 0 differences |
 
   The tests of part 3a do not need a browser, because the parity test of part 2 already proved that `extract_stages` gives the same rows as the JavaScript.
 
@@ -464,6 +486,43 @@ The project made these decisions in November 2026. At that time, the pipeline st
   - The parity tests are temporary. The project must remember to remove them after the switch.
 
 ## Changelog
+
+### November 2026: Soccerway adapter and the switch (roadmap step 2, part 3b)
+
+**What happened:** `FootballScraper` now uses the new parts of step 2. The pipeline gets the pages into the raw store, parses the stored pages in Python, and makes the JSON with the legacy exporter. The output did not change. Roadmap step 2 is complete. `PIPELINE_VERSION` is now `1.1.0`.
+
+**Why it was necessary:** Before, the scraper read the pages in the browser and made the output in one step. A parser repair needed a new scrape of approximately 30 minutes for each season. An interrupted run started again from the beginning.
+
+**How the project did it:**
+
+- `sources/soccerway/adapter.py`: `SoccerwayAdapter` with `discover_seasons`, `fetch` and `parse`. The adapter starts and stops the browser.
+- `fetch` keeps each page that it loads. A match page is *complete* when the store has it in the league timezone **and** the parser finds a halftime score in it. Only incomplete pages are loaded again. The adapter keeps a page without a halftime score, because the page can contain the kick-off time.
+- `parse` reads the stored pages. It does not use a browser or the network.
+- `FootballScraper` is now a short wrapper: fetch, parse, legacy exporter, statistics. Its public methods did not change. Thus, `main.py` and the Airflow tasks did not change, but Airflow now puts the raw store in the mounted `data/` folder.
+- `FootballScraper` assigns the adapter to a variable of the type `SourceAdapter`. Thus, basedpyright compares the adapter with the Protocol (decision 11).
+- The project removed the old code: the JavaScript parser, `parse_match_row`, the halftime loop and the parity tests (approximately 450 lines).
+- The adapter keeps the parsed match pages by sha256. Thus, `fetch` and `parse` do not parse the same page two times.
+
+**A bug that the new code corrected:** In the old scraper, a page that loaded without a halftime score was tried again only after pass 1. In pass 2, the scraper did not record it, thus pass 3 did not try it, and the log showed "0 failed". The baseline run showed this: pass 3 reported 0 failures, but two matches had no halftime score. The adapter tries such a page in each pass, and again in the next run.
+
+**Verification:**
+
+1. **Baseline.** The old scraper (version 1.0.1) scraped Ghana 2023/24 in Africa/Accra time: 306 matches. Two halftime scores were missing because of slow pages. A manual check of the two pages gave the values (0 - 1 and 0 - 0). The project added the two values to the baseline and kept the original file.
+2. **Live run of the new code:** 306 matches, 305 halftime scores, 0 network errors, 1,236 seconds. The new code found the two halftime scores itself. They agree with the manual check.
+3. **Comparison:** 306 matches, 4,590 match fields: **0 differences**. To make sure that the comparison can fail, the project compared the new output with the original baseline. The comparison found exactly the two missing halftime scores.
+4. **Run again from the raw store:** no requests to Soccerway, the same output. 92 seconds. With the cache of parsed pages: 47 seconds, 26 times faster than the live run.
+5. **Tests that were broken on purpose:**
+   - A wrong return type in `SoccerwayAdapter.parse`: basedpyright gave an error at the `SourceAdapter` variable.
+   - The old retry rule: the retry test failed (2 passes instead of 3).
+6. **Offline tests of `fetch`** (`test_soccerway_adapter.py`): Playwright answers each request with a fixture page. A second fetch sends no request. A damaged page is loaded again, and only that page.
+7. 192 tests pass. basedpyright gives 0 errors.
+
+**Trade-offs:**
+
+- The raw store uses disk space: 24 MB for this season.
+- A run from the raw store is not instant. Most of the 47 seconds is the parse of 305 large pages.
+- The adapter loads each match page in the browser, also for a page that the store has but that is not complete. For a season with many slow pages, a run can take some minutes.
+- `FootballScraper` stays until the Source Manager (roadmap step 6).
 
 ### November 2026: Legacy exporter (roadmap step 2, part 3a)
 
@@ -601,7 +660,7 @@ At the end of each step, the pipeline works.
 | Step | Work | Status |
 |---|---|---|
 | 1 | Repair the Soccerway scraper with stable selectors and saved-page fixtures | ✅ Done |
-| 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | In progress (parts 1, 2 and 3a done; part 3b next) |
+| 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | ✅ Done |
 | 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | Planned |
 | 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | Planned |
 | 5 | Add reconciliation between sources, validation rules, and season statuses | Planned |
