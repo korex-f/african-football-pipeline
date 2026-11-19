@@ -1,6 +1,7 @@
 """Tests for the SourceMatch model and its checks."""
 
 from datetime import date, time
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -10,7 +11,7 @@ from african_football.models.source_match import MatchStatus, SourceMatch
 
 def _match(**changes) -> SourceMatch:
     """Make a valid played match. Use `changes` to replace fields."""
-    fields = dict(
+    fields: dict[str, Any] = dict(
         source="soccerway",
         source_match_id="ttkJbibi",
         league_code="gh_pl",

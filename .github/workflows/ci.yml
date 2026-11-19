@@ -60,3 +60,6 @@ jobs:
 
       - name: Check linting
         run: uv run ruff check .
+
+      - name: Check types
+        run: uv run basedpyright
