@@ -28,3 +28,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/african_football"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
