@@ -441,7 +441,51 @@ The project made these decisions in November 2026. At that time, the pipeline st
   - Standard mode does not find all problems, for example values with an unknown type.
   - Later, when the old scraper is removed, the project can use `recommended` mode with a baseline. The baseline file records the current warnings. Then CI fails only on new warnings.
 
+### 13. Build the new code next to the old code, and prove that they are equal
+
+- **What:** The project does not replace a part of the pipeline in one step. It builds the new part next to the old part. A *parity test* runs the two parts on the same input and compares the outputs. Only after the outputs are equal does the pipeline change to the new part. Then the project removes the old part and its parity test.
+- **The debate:**
+  1. **Replace in one step.** This is faster to write. But if the output changes, it is difficult to find the cause, because many parts changed together.
+  2. **Build next to the old code (the decision).** Each pull request adds one new part and one parity test. The old code stays the reference until the switch.
+- **How:** Step 2 uses this method three times:
+
+  | Pull request | New part | Parity test |
+  |---|---|---|
+  | Part 2 | Python parser | `extract_stages` and `EXTRACT_STAGE_JS` give the same rows (Chromium) |
+  | Part 3a | Legacy exporter | Parser, `SourceMatch` and exporter give the same dictionaries as `parse_match_row` (no browser) |
+  | Part 3b | Soccerway adapter | A live scrape gives the same JSON as a new baseline from the old scraper |
+
+  The tests of part 3a do not need a browser, because the parity test of part 2 already proved that `extract_stages` gives the same rows as the JavaScript.
+
+  For each parity test, the project broke the new code on purpose. The test must fail. A test that never failed proves nothing.
+- **Trade-offs:**
+  - For some time, the project has two versions of the same function. A person must not change only one of them.
+  - Parity tests use fixtures. A fixture does not have all the special cases of the live site. Thus, part 3b also has a live check.
+  - The parity tests are temporary. The project must remember to remove them after the switch.
+
 ## Changelog
+
+### November 2026: Legacy exporter (roadmap step 2, part 3a)
+
+**What happened:** The project added `exports/legacy.py`. It makes the current JSON match format from `SourceMatch` records. The pipeline does not use it yet. Thus, the output did not change.
+
+**Why it was necessary:** `SourceMatch` keeps goals and penalty goals in different fields, and it uses numbers and dates. The current JSON and TXT files use a different format. The exporter keeps the special rules of this format in one location:
+
+- For a penalty shootout, `home_score` and `away_score` contain the shootout score, and `full_time_score` contains the score before the shootout (`0-0`, without spaces).
+- All scores are text. The halftime score has spaces (`2 - 1`).
+- The date is `DD.MM.YYYY`, or `DD.MM.YYYY HH:MM` if the kick-off time is known.
+- An awarded match always has the `awarded_reason` `walkover`.
+- The keys have the same sequence as before. The checksum of `file_saver` sorts the keys, but the JSON files show the keys in their sequence.
+
+**How:** `to_legacy_match` changes one `SourceMatch` into one dictionary. `to_legacy_stages` puts the dictionaries into stages, with `total_rounds` and `total_matches`. See decision 13 for the parity tests.
+
+**Verification:**
+
+- Parity tests on the league fixture and the cup fixture: all dictionaries are equal to the output of `parse_match_row`, also in key sequence. A third test adds the match page (kick-off time and halftime score).
+- The project broke the exporter two times on purpose: spaces in `full_time_score`, and two keys in a different sequence. The tests failed with the exact differences.
+- 10 new tests. All 209 tests pass. basedpyright gives 0 errors.
+
+**Trade-offs:** The exporter keeps the special rules of the legacy format alive. New outputs, for example the database in roadmap step 3, must use `SourceMatch` directly, not this format.
 
 ### November 2026: Type checking in CI
 
@@ -475,7 +519,7 @@ The project made these decisions in November 2026. At that time, the pipeline st
 - 18 parser tests without a browser, and 2 parity tests with Chromium.
 - All 199 tests pass.
 
-**Next (part 3):** the Soccerway adapter (`fetch` and `parse`), the legacy JSON exporter, and the change from the old scraper to the adapter. The project will verify the change against a saved live scrape of Ghana 2023/24. The JSON output must be the same.
+**Next (part 3):** the legacy JSON exporter (part 3a), then the Soccerway adapter (`fetch` and `parse`) and the change from the old scraper to the adapter (part 3b). The project will verify the change against a saved live scrape of Ghana 2023/24. The JSON output must be the same.
 
 ### November 2026: Faster CI and a pre-commit hook
 
@@ -557,7 +601,7 @@ At the end of each step, the pipeline works.
 | Step | Work | Status |
 |---|---|---|
 | 1 | Repair the Soccerway scraper with stable selectors and saved-page fixtures | ✅ Done |
-| 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | In progress (parts 1 and 2 of 3 done) |
+| 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | In progress (parts 1, 2 and 3a done; part 3b next) |
 | 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | Planned |
 | 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | Planned |
 | 5 | Add reconciliation between sources, validation rules, and season statuses | Planned |
