@@ -344,7 +344,112 @@ The project made these decisions in November 2026. At that time, the pipeline st
 - **Why:** Without a clear rule, the word "verified" has no meaning. Many African league seasons are not regular. Examples are seasons cancelled because of COVID, seasons with groups, and cancelled matches. Thus, the rule needs exceptions for each season.
 - **How (planned, roadmap step 5):** For a double round-robin league with *n* teams, the default expected number of matches is *n × (n − 1)*. The configuration can change this number for each season. Incomplete data never replaces verified data.
 
+### 8. Pydantic for data from a source, frozen dataclasses for internal data
+
+- **What:** The project uses two tools for data models. Each tool has a different job:
+
+  | Data | Tool | Examples |
+  |---|---|---|
+  | Data from a source, after the parser reads it | Pydantic | `SourceMatch` |
+  | Internal data that the code makes itself | Frozen dataclasses | `RawDocument`, `ResultRow`, `MatchPage` |
+  | Data for output (files, database) | Dedicated serializers | The legacy JSON exporter (roadmap step 2) |
+
+- **The debate:** The project examined three options.
+  1. **Only dataclasses.** The project already used dataclasses, and they add no dependency. But you must write each check by hand. Rules that compare fields are easy to forget, for example "a penalty shootout needs a draw".
+  2. **Only Pydantic.** Pydantic checks types and values when the code makes a record, and it converts records to and from JSON. But internal data does not need checks, because the code made it. Also, if the export uses `model_dump()`, the file format and the model become the same thing. Then a change to the model changes the files.
+  3. **Both, with separate jobs (the decision).** Errors come into the pipeline at one location: where page text becomes data. Pydantic checks the data at this location. Inside the pipeline, simple frozen dataclasses are sufficient.
+- **Why the settings of `SourceMatch` are strict:**
+  - `strict=True`: the parser converts text to values, for example `'3'` to `3`. The model only checks the values. In the default mode, Pydantic converts `'3'` to `3` silently. Then a parser error that sends text is not found. In strict mode, the error occurs at the location of the problem.
+  - `frozen=True`: after the parser makes a record, no step can change it. Many steps use the same records: export, database and reconciliation.
+  - `extra="forbid"`: a field name with a spelling error causes an error. It is not ignored.
+  - Model validators compare fields, for example: a played match must have a score, and a halftime score needs a full-time score.
+- **Not now:** A domain `Match` model (frozen dataclass) comes in roadmap step 5. With only one source, there is nothing to reconcile. A `Match` model now would be a copy of `SourceMatch` with no logic.
+- **Trade-offs:**
+  - Contributors must know two model styles.
+  - Pydantic is one more runtime dependency.
+  - Strict mode makes more work for each parser: it must convert all values itself.
+  - The model and the file format are separate. Thus, the legacy JSON format needs its own exporter code.
+
+### 9. Parsing runs in Python, not in the browser
+
+- **What:** Playwright only gets the pages. BeautifulSoup reads the stored HTML in Python. Before, a JavaScript function (`EXTRACT_STAGE_JS`) read the page in the browser.
+- **Why:**
+  - The pipeline can parse the stored pages again in seconds, without a browser and without the network.
+  - The parser tests do not need Chromium.
+  - The RSSSF adapter will parse text in Python too. Thus, all sources use the same method.
+- **The debate:** Option 1 was to keep the JavaScript parser and load each stored page into a headless browser to parse it again. This keeps the tested code, but each parse needs a browser. Option 2 (the decision) was to write the parser again in Python. The cost is a rewrite of approximately 60 lines of JavaScript.
+- **How:**
+  - The parser has three levels. Level 1 (`extract_stages`) gives exactly the same data as the JavaScript function. Level 2 adds the stage and the round to each row. Level 3 (`to_source_match`) converts the text to values and makes a `SourceMatch`.
+  - A parity test runs the JavaScript and the Python parser on the same fixture pages. The two outputs must be equal. To make sure that the test can fail, the project broke the Python parser on purpose. The test found the error.
+  - The parser uses `html.parser`, which is part of Python. The pages come from a browser, thus the HTML is correct. Speed is not important for approximately 300 pages for each season.
+- **Trade-offs:**
+  - Until roadmap step 2 is complete, two parsers exist. The parity test keeps them equal. When the old scraper is removed, the parity test is removed too.
+  - `lxml` is faster than `html.parser`, but it is one more dependency.
+
+### 10. The raw store keeps pages as files, with a manifest
+
+- **What:** The store keeps the pages of one season in one folder: `data/sources/{source}/{league}/{season}/`. Each page is a `.html.gz` file. A `manifest.json` file has an entry for each page: the URL, the file path, the fetch time (UTC), the sha256 value and the timezone.
+- **Why:**
+  - **Parse again:** after a parser repair, the pipeline reads the stored pages. It does not scrape the site again.
+  - **Resume:** a new run reads the manifest and does not get a page again.
+  - **Test fixtures:** a stored page can become a fixture for a regression test.
+- **How:**
+  - The store writes the page file first, then the manifest. If the process stops between the two writes, the manifest does not refer to a missing file.
+  - The store writes the manifest to a temporary file, then renames it. A rename is atomic. Thus, the manifest is never half written.
+  - The sha256 value comes from the HTML text, not from the gzip file. The gzip header contains a time. Thus, the same page gives different gzip bytes.
+  - When the store reads a page, it compares the sha256 value. A damaged file causes an error. It does not give wrong data.
+  - The store rejects unsafe file names, for example names with `..`. The match IDs in the file names come from the web page, and the store must not trust them.
+  - `has(url, timezone)` compares the timezone too. Soccerway shows times in the browser timezone. Thus, a page from a different timezone is different data.
+- **Trade-offs:**
+  - Disk space: an estimate is 10–30 MB for each season, compressed. The project has not measured this value yet. The `data/` folder is not in git.
+  - The store writes the full manifest at each save. For approximately 300 pages in each season, this is fast.
+  - In roadmap step 3, the page metadata can move from the manifest into PostgreSQL.
+
+### 11. The adapter interface is a Protocol, not a base class
+
+- **What:** `SourceAdapter` is a `typing.Protocol` with `discover_seasons`, `fetch` (both async) and `parse`.
+- **Why:** An adapter does not inherit from a base class. A class that has these methods is an adapter. Thus, the adapters do not depend on a shared base module, and there is no class hierarchy. `fetch` uses the network, thus it is async. `parse` reads files only, thus it is not async.
+- **Trade-offs:** Python does not examine a Protocol when the program runs. Only a type checker (Pyright) finds an adapter with a wrong method. CI does not run Pyright yet.
+
 ## Changelog
+
+### November 2026: Source-neutral model and Python parser (roadmap step 2, parts 1 and 2)
+
+**What happened:** The project added the first parts of the multi-source structure. The pipeline does not use them yet. Thus, the output did not change.
+
+- Part 1: the `SourceMatch` model, the `SourceAdapter` interface, and the raw page store (`RawStore`). See decisions 8, 10 and 11.
+- Part 2: a Python parser for the stored Soccerway pages, with a parity test against the JavaScript parser. See decision 9.
+
+**Why it was necessary:** The old scraper reads the page in the browser and makes the output in one step. Thus, a parser repair needed a new scrape, and the data format followed the Soccerway page. The new parts keep the raw pages, parse them in Python, and make records that do not depend on the source.
+
+**How the project did it:**
+
+- `models/source_match.py`: `SourceMatch` and `MatchStatus`. Goals and penalty goals are in different fields. `MatchStatus` replaces the `awarded` and `penalty_shootout` flags.
+- `sources/base.py`: `SourceAdapter` and `RawDocument`.
+- `sources/raw_store.py`: `RawStore`.
+- `sources/soccerway/parser.py`: the parser. The functions `parse_round` and `parse_kickoff` moved here from the old scraper. The old scraper imports them, thus each function exists one time only.
+
+**Verification:**
+
+- 20 tests for `RawStore` and 22 tests for `SourceMatch`.
+- 18 parser tests without a browser, and 2 parity tests with Chromium.
+- All 199 tests pass.
+
+**Next (part 3):** the Soccerway adapter (`fetch` and `parse`), the legacy JSON exporter, and the change from the old scraper to the adapter. The project will verify the change against a saved live scrape of Ghana 2023/24. The JSON output must be the same.
+
+### November 2026: Faster CI and a pre-commit hook
+
+**What happened:** CI took 7–9 minutes for each run. Now it takes less than 1 minute.
+
+**Why:** The step that installs the system packages for Chromium used `apt-get`. The Ubuntu package server was slow (64 kB/s). Each check, also the format check, waited for this step.
+
+**How:** See [Code Checks](#code-checks). The `lint` job does not install a browser. The `test` job runs in the Playwright Docker image, which contains the system packages. A pre-commit hook runs Ruff and file checks before each commit.
+
+**Trade-offs:**
+
+- The tag of the Docker image must agree with the Playwright version in `uv.lock`. A person must change the two together.
+- The Docker image download takes approximately 20 seconds of each run.
+- Each clone must run `uv run pre-commit install` one time.
 
 ### November 2026: Kick-off times in local league time
 
@@ -412,7 +517,7 @@ At the end of each step, the pipeline works.
 | Step | Work | Status |
 |---|---|---|
 | 1 | Repair the Soccerway scraper with stable selectors and saved-page fixtures | ✅ Done |
-| 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | Planned |
+| 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | In progress (parts 1 and 2 of 3 done) |
 | 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | Planned |
 | 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | Planned |
 | 5 | Add reconciliation between sources, validation rules, and season statuses | Planned |
@@ -428,6 +533,7 @@ At the end of each step, the pipeline works.
 | Playwright | Browser automation |
 | PyYAML | Configuration |
 | Pydantic | Checks the match records from the source parsers |
+| BeautifulSoup | Reads the stored HTML pages |
 | Apache Airflow | Orchestration (local Docker) |
 | PostgreSQL | Central database (planned, roadmap step 3) |
 | pytest | Testing framework |
