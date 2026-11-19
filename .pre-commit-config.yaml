@@ -1,0 +1,26 @@
+exclude: '^tests/fixtures/'
+repos:
+- repo: local
+  hooks:
+    # Run the linter.
+    - id: ruff-check
+      name: ruff check
+      entry: uv run ruff check --fix
+      language: system
+      types: [python]
+    # Run the formatter.
+    - id: ruff-format
+      name: ruff format
+      entry: uv run ruff format
+      language: system
+      types: [python]
+
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v6.0.0
+  hooks:
+    - id: check-yaml
+    - id: check-toml
+    - id: end-of-file-fixer
+    - id: trailing-whitespace
+    - id: check-merge-conflict
+    - id: check-added-large-files
