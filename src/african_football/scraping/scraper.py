@@ -14,7 +14,6 @@ Typical usage:
 
 import asyncio
 import random
-import re
 from datetime import datetime
 from typing import Any, Optional
 
@@ -27,6 +26,13 @@ from playwright.async_api import (
 
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord
+from african_football.sources.soccerway.parser import (
+    AWARDED_INDICATORS,
+    SCORE_PATTERN,
+    clean_score,
+    parse_kickoff,
+    parse_round,
+)
 from african_football.utils.logger import PipelineLogger
 
 PIPELINE_VERSION = "1.0.1"
@@ -54,14 +60,8 @@ HALFTIME_SCORE = (
     " >> xpath=following-sibling::span[1]"
 )
 
-# Indicator texts that show an awarded result. The teams did not play.
-AWARDED_INDICATORS = {"awrd", "wo"}
-
 # The kick-off date and time on a match page, for example '15.09.2023 19:30'.
 KICKOFF_TIME = ".duelParticipant__startTime"
-
-_SCORE_PATTERN = re.compile(r"^\d+\s*-\s*\d+$")
-_KICKOFF_PATTERN = re.compile(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$")
 
 # Write a progress line after this number of match pages in the halftime step.
 HALFTIME_PROGRESS_INTERVAL = 15
@@ -128,49 +128,6 @@ EXTRACT_STAGE_JS = """
 """
 
 
-def _clean_score(value: Optional[str]) -> Optional[str]:
-    """Return the score if it is a number. If not (for example '-'), return None."""
-    if value is None:
-        return None
-    value = value.strip()
-    return value if value.isdigit() else None
-
-
-def parse_kickoff(text: Optional[str]) -> Optional[str]:
-    """
-    Get the kick-off date and time from the text of a match page.
-
-    Args:
-        text: The kick-off text, for example '15.09.2023 19:30'.
-
-    Returns:
-        The kick-off as 'DD.MM.YYYY HH:MM'. If the text does not have
-        this format, return None.
-    """
-    if text is None:
-        return None
-    text = " ".join(text.split())
-    return text if _KICKOFF_PATTERN.match(text) else None
-
-
-def parse_round(round_text: str) -> Optional[int]:
-    """
-    Get the round number from a round header, for example 'Round 12'.
-
-    Args:
-        round_text: The text of the round header.
-
-    Returns:
-        The round number. For a round with a name (for example
-        'Semi-finals'), return None.
-    """
-    lowered = round_text.lower()
-    if "round" not in lowered:
-        return None
-    num_str = lowered.replace("round", "").strip()
-    return int(num_str) if num_str.isdigit() else None
-
-
 def parse_match_row(
     row: dict[str, Any],
     round_name: Optional[str],
@@ -200,8 +157,8 @@ def parse_match_row(
         A match dictionary. If a necessary field is missing, return None.
     """
     home, away = row.get("home_team"), row.get("away_team")
-    home_score = _clean_score(row.get("home_score"))
-    away_score = _clean_score(row.get("away_score"))
+    home_score = clean_score(row.get("home_score"))
+    away_score = clean_score(row.get("away_score"))
     indicator = (row.get("indicator") or "").strip().lower()
     is_awarded = indicator in AWARDED_INDICATORS
 
@@ -213,8 +170,8 @@ def parse_match_row(
 
     link = row.get("link")
     url = f"{BASE_URL}{link}" if link and not link.startswith("http") else link
-    home_pen = _clean_score(row.get("home_pen"))
-    away_pen = _clean_score(row.get("away_pen"))
+    home_pen = clean_score(row.get("home_pen"))
+    away_pen = clean_score(row.get("away_pen"))
 
     match: dict[str, Any] = {
         "stage": stage_name,
@@ -679,7 +636,7 @@ class FootballScraper:
         try:
             await ht_loc.wait_for(timeout=HALFTIME_WAIT_MS)
             ht_text = (await ht_loc.inner_text()).strip()
-            ht = ht_text if _SCORE_PATTERN.match(ht_text) else None
+            ht = ht_text if SCORE_PATTERN.match(ht_text) else None
         except PlaywrightTimeoutError:
             ht = None
 

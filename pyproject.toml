@@ -5,6 +5,7 @@ description = "Multi-source historical data pipeline for African domestic footba
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "beautifulsoup4>=4.13",
     "playwright>=1.65.1",
     "pydantic>=2.12",
     "pyyaml>=6.0.3",
