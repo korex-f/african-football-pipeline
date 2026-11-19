@@ -202,10 +202,18 @@ uv run pre-commit run --all-files
 
 | Job | Steps | Time |
 |-----|-------|------|
-| `lint` | `ruff format --check`, `ruff check` | Approximately 20 seconds |
+| `lint` | `ruff format --check`, `ruff check`, `basedpyright` | Approximately 30 seconds |
 | `test` | Install Chromium, then `pytest` | Approximately 1 minute |
 
 The two jobs run at the same time. The `lint` job does not install a browser, thus it gives a result quickly.
+
+The type checker (`basedpyright`) runs only in CI, not in the pre-commit hook. It checks the full project, not only the changed files, and it takes approximately 16 seconds. A slow hook makes people skip it. Your editor shows the same type errors while you write the code (see the version rules below).
+
+To run the type checker in your terminal:
+
+```bash
+uv run basedpyright
+```
 
 The `test` job runs in the `mcr.microsoft.com/playwright/python` Docker image. This image contains the system packages that Chromium needs. Before, CI installed these packages with `apt-get`. On a slow day, the Ubuntu package server made this step take 9 minutes.
 
@@ -213,6 +221,7 @@ The `test` job runs in the `mcr.microsoft.com/playwright/python` Docker image. T
 
 - The pre-commit hook, CI and your terminal use the same Ruff version: the version in `uv.lock`. The hook runs `uv run ruff`. It does not install a different Ruff.
 - The tag of the Docker image must agree with the Playwright version in `uv.lock`, for example `v1.65.1-noble` for Playwright 1.65.1. When you upgrade Playwright, change the tag in `.github/workflows/ci.yml` in the same pull request.
+- CI and your terminal use the basedpyright version in `uv.lock`. The `[tool.pyright]` section of `pyproject.toml` sets `typeCheckingMode = "standard"`. An editor that uses basedpyright, Pyright or Pylance reads this section. The project setting replaces the setting of the editor. Thus, the editor shows the same errors as CI.
 
 ### Standalone Tools
 
@@ -409,9 +418,40 @@ The project made these decisions in November 2026. At that time, the pipeline st
 
 - **What:** `SourceAdapter` is a `typing.Protocol` with `discover_seasons`, `fetch` (both async) and `parse`.
 - **Why:** An adapter does not inherit from a base class. A class that has these methods is an adapter. Thus, the adapters do not depend on a shared base module, and there is no class hierarchy. `fetch` uses the network, thus it is async. `parse` reads files only, thus it is not async.
-- **Trade-offs:** Python does not examine a Protocol when the program runs. Only a type checker (Pyright) finds an adapter with a wrong method. CI does not run Pyright yet.
+- **Trade-offs:** Python does not examine a Protocol when the program runs. Only a type checker finds an adapter with a wrong method. CI runs a type checker (basedpyright, see decision 12). But a type checker examines a Protocol only where the code uses it, for example `adapter: SourceAdapter = SoccerwayAdapter()`. At this time, no code uses `SourceAdapter`. A test proved this: a wrong return type in the Protocol gave no error. The real check starts with the Soccerway adapter (roadmap step 2, part 3).
+
+### 12. The type checker is basedpyright, in standard mode
+
+- **What:** CI runs `basedpyright` in the `lint` job. The project sets `typeCheckingMode = "standard"` in `pyproject.toml`.
+- **The debate:**
+  1. **Pyright** is the type checker from Microsoft. Its default mode is `standard`. It needs Node.js on the computer.
+  2. **basedpyright** is a community fork of Pyright. It uses the same type-checking engine and follows the Pyright releases. It adds more rules, a *baseline* function, and editor functions that are not open source in Pylance. The PyPI package contains Node.js. Its default mode is `recommended`, which is much stricter.
+  3. **The decision: basedpyright.** The editors of the project author (Neovim and Zed) use basedpyright. If CI used Pyright and the editors used basedpyright, the two tools would show different errors. This is the same problem as two Ruff versions.
+- **Why standard mode:** The project measured the two modes on the same code:
+
+  | Mode | Result |
+  |---|---|
+  | `standard` | 21 errors, all on one line of a test helper |
+  | `recommended` | 82 errors and 1,501 warnings, most in the old scraper code |
+
+  In standard mode, Pyright and basedpyright gave the same 21 errors. The project corrected the line (a `dict[str, Any]` type annotation). A new CI check must start with no errors. If not, it stops each pull request until a person corrects the old code.
+- **How:** `basedpyright` is a dev dependency, thus `uv.lock` sets its version. The `[tool.pyright]` section has the settings. basedpyright, Pyright and Pylance all read this section. To make sure that the check can fail, the project changed a return type in `RawStore.get` on purpose. basedpyright found the error.
+- **Trade-offs:**
+  - basedpyright is a fork. A new Pyright release can come to basedpyright some days later.
+  - Standard mode does not find all problems, for example values with an unknown type.
+  - Later, when the old scraper is removed, the project can use `recommended` mode with a baseline. The baseline file records the current warnings. Then CI fails only on new warnings.
 
 ## Changelog
+
+### November 2026: Type checking in CI
+
+**What happened:** The `lint` job in CI now runs `basedpyright`.
+
+**Why:** Decision 11 showed a gap. Only a type checker examines the `SourceAdapter` Protocol, but no type checker ran automatically.
+
+**How:** See decision 12 and [Code Checks](#code-checks). The project corrected the 21 errors before it added the check. Thus, the check started with no errors.
+
+**Trade-offs:** The `lint` job takes approximately 20 seconds more. The type checker is not in the pre-commit hook, because it takes approximately 16 seconds.
 
 ### November 2026: Source-neutral model and Python parser (roadmap step 2, parts 1 and 2)
 
@@ -540,7 +580,7 @@ At the end of each step, the pipeline works.
 | Ruff | Linting and formatting |
 | pre-commit | Runs the checks before each commit |
 | GitHub Actions | CI: runs the checks and the tests on each pull request |
-| Pylance | Static type checking |
+| basedpyright | Static type checking (CI and editors) |
 
 ## License
 
