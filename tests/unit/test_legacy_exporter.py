@@ -1,62 +1,20 @@
 """
 Tests for the legacy exporter in exports/legacy.py.
 
-The parity tests compare two methods on the same fixture pages:
-    - Old: parse_match_row from the old scraper.
-    - New: the Python parser, then SourceMatch, then the legacy exporter.
-The output must be the same.
-
-These tests do not use a browser. The data of extract_stages is the same
-as the data of the JavaScript parser (see test_soccerway_parser_parity.py).
+Until version 1.1.0, parity tests also compared the exporter with the old
+scraper (parse_match_row). The old scraper was removed in roadmap step 2,
+part 3b. A live check against a baseline scrape replaced the parity tests.
 """
 
 from datetime import date, time
-from pathlib import Path
-from typing import Any, Optional
-
-import pytest
+from typing import Any
 
 from african_football.exports.legacy import to_legacy_match, to_legacy_stages
 from african_football.models.source_match import MatchStatus, SourceMatch
-from african_football.scraping.scraper import parse_match_row
-from african_football.sources.soccerway.parser import (
-    MatchPage,
-    extract_stages,
-    parse_match_page,
-    parse_results_page,
-    parse_round,
-    to_source_match,
-)
 
-FIXTURES = Path(__file__).parent.parent / "fixtures" / "soccerway"
 CONTEXT: dict[str, Any] = dict(
     league_code="npfl", season="2023/2024", timezone="Africa/Lagos"
 )
-
-
-def _old_method(html: str) -> list[dict[str, Any]]:
-    """Make the match dictionaries with the old scraper functions."""
-    matches = []
-    for stage_name, elements in extract_stages(html):
-        round_name, round_number = None, None
-        for el in elements:
-            if el["type"] == "round":
-                round_name, round_number = el["text"], parse_round(el["text"])
-            else:
-                match = parse_match_row(el, round_name, round_number, stage_name)
-                if match:
-                    matches.append(match)
-    return matches
-
-
-def _new_method(html: str, page: Optional[MatchPage] = None) -> list[dict[str, Any]]:
-    """Make the match dictionaries with the parser and the legacy exporter."""
-    matches = []
-    for row in parse_results_page(html):
-        source_match = to_source_match(row, page, **CONTEXT)
-        if source_match:
-            matches.append(to_legacy_match(source_match))
-    return matches
 
 
 def _match(**changes: Any) -> SourceMatch:
@@ -78,36 +36,6 @@ def _match(**changes: Any) -> SourceMatch:
     )
     fields.update(changes)
     return SourceMatch(**fields)
-
-
-# ---------------------------------------------------------------------------
-# Parity with the old scraper
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("fixture", ["league_results.html", "cup_results.html"])
-def test_exporter_gives_same_output_as_old_scraper(fixture):
-    html = (FIXTURES / fixture).read_text()
-    old, new = _old_method(html), _new_method(html)
-
-    assert len(new) == len(old)
-    for new_match, old_match in zip(new, old):
-        # Compare the key sequence too. The JSON files must have the same text.
-        assert list(new_match) == list(old_match)
-        assert new_match == old_match
-
-
-def test_exporter_gives_same_output_with_match_page():
-    # The old scraper changes 'date' and 'half_time_score' after it reads
-    # the match page. The values come from the match page fixture.
-    html = (FIXTURES / "league_results.html").read_text()
-    page = parse_match_page((FIXTURES / "match_page.html").read_text())
-
-    old = _old_method(html)[0]
-    old["date"] = "23.06.2024 16:00"
-    old["half_time_score"] = "2 - 1"
-
-    assert _new_method(html, page)[0] == old
 
 
 # ---------------------------------------------------------------------------
