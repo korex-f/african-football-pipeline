@@ -16,8 +16,10 @@ from african_football.models.source_match import MatchStatus, SourceMatch
 from african_football.sources.soccerway.parser import (
     MatchPage,
     ResultRow,
+    parse_kickoff,
     parse_match_page,
     parse_results_page,
+    parse_round,
     to_source_match,
 )
 
@@ -216,3 +218,30 @@ def test_fixture_pages_give_valid_source_matches(league_rows, cup_rows):
     # All rows in the fixtures must give a valid SourceMatch, or None.
     for row in league_rows + cup_rows:
         _convert(row)
+
+
+# ---------------------------------------------------------------------------
+# parse_round and parse_kickoff
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("Round 12", 12), ("round 1", 1), ("Semi-finals", None), ("Round A", None)],
+)
+def test_parse_round(text, expected):
+    assert parse_round(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("15.09.2023 19:30", "15.09.2023 19:30"),
+        ("  15.09.2023\n19:30 ", "15.09.2023 19:30"),
+        ("15.09.2023", None),
+        ("Postponed", None),
+        (None, None),
+    ],
+)
+def test_parse_kickoff(text, expected):
+    assert parse_kickoff(text) == expected

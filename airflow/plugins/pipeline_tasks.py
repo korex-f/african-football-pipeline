@@ -24,6 +24,9 @@ CONFIG_PATH = "/opt/airflow/project/config/leagues.yaml"
 CANONICAL_TEAMS_DIR = "/opt/airflow/project/config/canonical_teams"
 DATA_RAW_DIR = "/opt/airflow/project/data/raw"
 DATA_EXPORTS_DIR = "/opt/airflow/project/data/exports"
+# The raw page store. It is in the mounted data folder, thus the pages stay
+# after the container stops.
+DATA_SOURCES_DIR = "/opt/airflow/project/data/sources"
 REVIEW_DIR = "/opt/airflow/project/data/logs/unmatched_teams"
 
 
@@ -111,7 +114,9 @@ async def _scrape_season_async(league_dict: dict, season_dict: dict) -> dict[str
     logger = PipelineLogger(log_dir="/opt/airflow/logs/pipeline")
 
     # Scrape
-    async with FootballScraper(league, season, logger, headless=True) as scraper:
+    async with FootballScraper(
+        league, season, logger, headless=True, raw_root=Path(DATA_SOURCES_DIR)
+    ) as scraper:
         data = await scraper.scrape()
 
     # Normalise team names

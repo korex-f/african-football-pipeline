@@ -7,9 +7,9 @@ again, and the tests do not need Chromium.
 
 The module has three levels:
 
-    1. extract_stages:    reads the results page. It returns the same
-                          data as EXTRACT_STAGE_JS in the old scraper.
-                          A parity test compares the two.
+    1. extract_stages:    reads the results page. It started as a copy
+                          of the JavaScript function of the old scraper
+                          (EXTRACT_STAGE_JS, removed in version 1.1.0).
     2. parse_results_page and parse_match_page: give typed data with
                           the round and the stage of each row.
     3. to_source_match:   converts the data to a SourceMatch. The
@@ -105,7 +105,7 @@ def parse_round(round_text: str) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
-# Level 1: the same data as EXTRACT_STAGE_JS
+# Level 1: the stages and rows of the results page
 # ---------------------------------------------------------------------------
 
 
@@ -155,8 +155,7 @@ def extract_stages(html: str) -> list[tuple[str, list[dict[str, Any]]]]:
 
     Returns:
         A list of (stage_name, elements). The elements are in page
-        sequence. Each element is a dict with the same keys as the
-        output of EXTRACT_STAGE_JS:
+        sequence. Each element is a dict:
             {'type': 'round', 'text': ...} or
             {'type': 'match', 'id': ..., 'date': ..., 'indicator': ...,
              'home_team': ..., 'away_team': ..., 'home_score': ...,
