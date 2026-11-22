@@ -63,3 +63,6 @@ jobs:
 
       - name: Check types
         run: uv run basedpyright
+
+      - name: Check SQL linting
+        run: uv run sqlfluff lint src/african_football/db/migrations
