@@ -18,3 +18,4 @@ services:
 
 volumes:
   pipeline-db-volume:
+    name: african-football-pipeline-db
