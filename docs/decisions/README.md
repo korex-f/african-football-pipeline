@@ -23,3 +23,4 @@ Each file is one decision. A decision file is not deleted. If the project change
 | 15 | [Plain SQL migrations with a small runner, not Alembic](0015-plain-sql-migrations-not-alembic.md) |
 | 16 | [The database repeats the simple rules of SourceMatch](0016-database-repeats-sourcematch-rules.md) |
 | 17 | [sqlfluff formats the SQL files](0017-sqlfluff-formats-sql.md) |
+| 18 | [The loader records each run in three transactions, and keeps the matches that the source stops to show](0018-loader-records-each-run.md) |

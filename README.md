@@ -46,7 +46,9 @@ src/african_football/
 ├── exports/
 │   └── legacy.py                 ← SourceMatch → the current JSON match format
 ├── db/
+│   ├── README.md                 ← The SQL techniques of the module (upsert, xmax, IS DISTINCT FROM)
 │   ├── migrate.py                ← Migration runner (python -m african_football.db.migrate)
+│   ├── loader.py                 ← RunRecorder: writes each run, its pages and its matches
 │   └── migrations/
 │       └── 001_initial.sql       ← The first schema: six tables
 └── utils/
@@ -145,6 +147,9 @@ The pipeline database is a PostgreSQL 18 container (`pipeline-db`, `localhost:54
 
 ```bash
 uv run python main.py
+
+# Also write each run to the pipeline database
+uv run --env-file .env python main.py
 ```
 
 The CLI presents interactive menus:
@@ -297,7 +302,7 @@ At the end of each step, the pipeline works.
 |---|---|---|
 | 1 | Repair the Soccerway scraper with stable selectors and saved-page fixtures | ✅ Done |
 | 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | ✅ Done |
-| 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | In progress: part 1 of 3 done (database, schema, migrations) |
+| 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | In progress: parts 1 and 2 of 3 done (database, schema, migrations, loader) |
 | 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | Planned |
 | 5 | Add reconciliation between sources, validation rules, and season statuses | Planned |
 | 6 | Add the Source Manager with fallback and resume. The Airflow DAG calls the library. | Planned |
