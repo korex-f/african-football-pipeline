@@ -426,6 +426,14 @@ async def main() -> None:
     season selection, runs the scraping pipeline for each selection,
     and prints a final summary.
     """
+    # The pipeline writes each run to the database, and makes the exports
+    # from it. Stop before the menus, not after the first scrape.
+    if not os.environ.get("DATABASE_URL"):
+        sys.exit(
+            "DATABASE_URL is not set. Start the database (docker compose up -d) "
+            "and run: uv run --env-file .env python main.py"
+        )
+
     logger = PipelineLogger()
     start_time = datetime.now()
 

@@ -205,9 +205,13 @@ def test_damaged_match_page_is_fetched_again(league, season, store):
     assert [u for u in site.requests if AKWA in u] == [document.url]
 
 
-def test_football_scraper_uses_the_stored_pages(league, season, tmp_path):
+@pytest.mark.db
+def test_football_scraper_uses_the_stored_pages(
+    league, season, tmp_path, pipeline_database
+):
     # Fill the raw store with complete pages. Then the scraper does not
-    # need the network.
+    # need the network. The scraper writes the matches to the database, and
+    # makes the output from the matches that it reads back.
     raw_root = tmp_path / "sources"
     store = RawStore(raw_root, "soccerway", "npfl", "2023/2024")
     asyncio.run(_fetch(league, season, store, _FakeSite()))
@@ -218,6 +222,7 @@ def test_football_scraper_uses_the_stored_pages(league, season, tmp_path):
             season,
             _RecordingLogger(),  # type: ignore[arg-type]
             raw_root=raw_root,
+            database_url=pipeline_database,
         ) as scraper:
             return await scraper.scrape()
 

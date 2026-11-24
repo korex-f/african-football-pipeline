@@ -12,6 +12,9 @@ A RunRecorder records one run of one source for one season:
                  one transaction: the database never has a part of a run.
     3. fail():   changes the run to 'failed' and records the error.
 
+load() also writes season_coverage from the matches of the run (decision 7):
+expected = n * (n - 1) for n teams, found = the played and awarded matches.
+
 A new run of the same season updates the matches. It does not add them again
 (the key is source + source_match_id). A match keeps its first_seen_at.
 updated_at changes only if the data of the match changed. A match that the
@@ -101,6 +104,52 @@ _UPSERT_MATCH = f"""
 """
 
 
+# Write the coverage of the season from the matches of this run (decision 7).
+# - n is the number of different teams in the matches of the run. For a double
+#   round-robin league, the expected number of matches is n * (n - 1).
+# - found counts only the played and awarded matches. A postponed or
+#   cancelled match is not a result.
+# - Data of one source never replaces a 'verified' season. The WHERE of
+#   DO UPDATE then writes nothing.
+_UPSERT_COVERAGE = """
+    WITH run_matches AS (
+        SELECT home_team_raw, away_team_raw, status
+        FROM source_matches WHERE last_run_id = %(run_id)s
+    ),
+    teams AS (
+        SELECT home_team_raw AS team FROM run_matches
+        UNION
+        SELECT away_team_raw FROM run_matches
+    ),
+    counts AS (
+        SELECT
+            (SELECT count(*) FROM teams) AS n,
+            (SELECT count(*) FROM run_matches
+             WHERE status IN ('played', 'awarded')) AS found
+    )
+    INSERT INTO season_coverage
+        (season_id, expected_matches, found_matches, status, last_run_id)
+    SELECT
+        %(season_id)s,
+        n * (n - 1),
+        found,
+        CASE
+            WHEN found > 0 AND found >= n * (n - 1) THEN 'complete_single_source'
+            ELSE 'incomplete'
+        END,
+        %(run_id)s
+    FROM counts
+    ON CONFLICT (season_id) DO UPDATE SET
+        expected_matches = EXCLUDED.expected_matches,
+        found_matches = EXCLUDED.found_matches,
+        status = EXCLUDED.status,
+        last_run_id = EXCLUDED.last_run_id,
+        updated_at = now()
+    WHERE season_coverage.status <> 'verified'
+    RETURNING expected_matches, status
+"""
+
+
 @dataclass(frozen=True)
 class LoadSummary:
     """
@@ -116,6 +165,8 @@ class LoadSummary:
     matches_not_seen:   the matches of the season and source in the table that
                         this run did not write. The source does not show them
                         now. They stay in the table.
+    expected_matches:   n * (n - 1) for the n teams of this run.
+    coverage_status:    the status in season_coverage after this run.
     """
 
     pages_fetched: int
@@ -124,6 +175,8 @@ class LoadSummary:
     matches_new: int
     matches_changed: int
     matches_not_seen: int
+    expected_matches: int
+    coverage_status: str
 
 
 class RunRecorder:
@@ -260,6 +313,19 @@ class RunRecorder:
             ).fetchone()
             assert not_seen_row is not None
 
+            coverage_row = self.conn.execute(
+                _UPSERT_COVERAGE,
+                {"season_id": self.season_id, "run_id": self.run_id},
+            ).fetchone()
+            if coverage_row is None:
+                # The season is 'verified'. The WHERE of DO UPDATE kept it.
+                coverage_row = self.conn.execute(
+                    "SELECT expected_matches, status FROM season_coverage"
+                    " WHERE season_id = %s",
+                    (self.season_id,),
+                ).fetchone()
+                assert coverage_row is not None
+
             pages_fetched = sum(
                 1 for doc in documents if doc.fetched_at >= self.started_at
             )
@@ -285,10 +351,17 @@ class RunRecorder:
             matches_new=matches_new,
             matches_changed=matches_changed,
             matches_not_seen=not_seen_row[0],
+            expected_matches=coverage_row[0],
+            coverage_status=coverage_row[1],
         )
 
     def fail(self, error: BaseException) -> None:
-        """Mark the run 'failed', and record the error."""
+        """Mark the run 'failed', and record the error.
+
+        If the season has no coverage yet, its coverage becomes 'failed'.
+        A season that has coverage keeps it: a failed run does not remove
+        the result of an earlier run.
+        """
         message = f"{type(error).__name__}: {error}"
         with self.conn.transaction():
             self.conn.execute(
@@ -300,6 +373,15 @@ class RunRecorder:
                 WHERE run_id = %s
                 """,
                 (message, self.run_id),
+            )
+            self.conn.execute(
+                """
+                INSERT INTO season_coverage
+                    (season_id, found_matches, status, last_run_id)
+                VALUES (%s, 0, 'failed', %s)
+                ON CONFLICT (season_id) DO NOTHING
+                """,
+                (self.season_id, self.run_id),
             )
 
     def _match_values(self, match: SourceMatch, position: int) -> tuple:
