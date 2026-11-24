@@ -21,6 +21,20 @@ jobs:
     container:
       # Keep this tag the same as the Playwright version in uv.lock
       image: mcr.microsoft.com/playwright/python:v1.65.1-noble
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: pipeline
+          POSTGRES_PASSWORD: pipeline
+          POSTGRES_DB: football
+        options: >-
+          --health-cmd "pg_isready -U pipeline -d football"
+          --health-interval 5s
+          --health-timeout 4s
+          --health-retries 10s
+    env:
+      DATABASE_URL: postgresql://pipeline:pipeline@postgres:5432/football
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,8 +50,12 @@ jobs:
       - name: Install Playwright browsers
         run: uv run playwright install chromium
 
+      - name: Apply migrations
+        run: uv run python -m african_football.db.migrate
+
       - name: Run tests
         run: uv run pytest
+
 
   lint:
     runs-on: ubuntu-24.04

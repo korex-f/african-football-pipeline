@@ -154,9 +154,15 @@ def database_url() -> str:
 
     If DATABASE_URL is not set, the test is skipped. Thus the tests that
     need a database do not fail on a computer without Postgres.
+
+    In CI (the CI variable is set), a missing DATABASE_URL is an error, not
+    a skip. Without this rule, an error in the workflow file can skip all the
+    database tests, and CI still shows a pass.
     """
     url = os.environ.get("DATABASE_URL")
     if not url:
+        if os.environ.get("CI"):
+            pytest.fail("DATABASE_URL is not set in CI")
         pytest.skip("DATABASE_URL is not set")
     return url
 
