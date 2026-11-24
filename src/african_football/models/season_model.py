@@ -13,6 +13,24 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+def season_label(start_year: int, end_year: int) -> str:
+    """Give the label of a season, for example '2023/2024' or '2019'.
+
+    A season that starts and ends in the same year (a calendar-year season)
+    has the year only. A season that crosses into the next year has the two
+    years. All sources use this function. Thus the same season has the same
+    label from each source, and the seasons table has one row for it.
+
+    Raises ValueError if end_year is not start_year or start_year + 1. The
+    seasons table has the same rule (a CHECK constraint).
+    """
+    if end_year == start_year:
+        return str(start_year)
+    if end_year == start_year + 1:
+        return f"{start_year}/{end_year}"
+    raise ValueError(f"not a season: {start_year} to {end_year}")
+
+
 class SeasonStatus(Enum):
     """
     Represents the completion state of a discovered season.

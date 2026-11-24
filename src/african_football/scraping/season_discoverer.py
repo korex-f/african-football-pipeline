@@ -22,7 +22,11 @@ from typing import Any
 from playwright.async_api import Browser, Page, async_playwright
 
 from african_football.models.league_model import LeagueConfig
-from african_football.models.season_model import SeasonRecord, SeasonStatus
+from african_football.models.season_model import (
+    SeasonRecord,
+    SeasonStatus,
+    season_label,
+)
 from african_football.scraping.url_builder import BASE_URL, build_archive_url
 from african_football.utils.logger import PipelineLogger
 
@@ -202,7 +206,7 @@ class SeasonDiscoverer:
         )
 
         return SeasonRecord(
-            season=f"{start_year}/{end_year}",
+            season=season_label(start_year, end_year),
             start_year=start_year,
             end_year=end_year,
             status=status,
@@ -280,9 +284,12 @@ class SeasonDiscoverer:
 
         Handles both formats:
             Split year: /ghana/premier-league-2024-2025/ → (2024, 2025)
-            Single year: /ghana/premier-league-2018/    → (2017, 2018)
+            Single year: /ghana/premier-league-2018/    → (2018, 2018)
 
-        For single year format, start_year is derived as year - 1.
+        A single year is a calendar-year season. It starts and ends in that
+        year. (Before version 1.2.0, the start year was year - 1. Then the 2019
+        season had the label '2018/2019', which is the label of a different
+        season shape.)
 
         Args:
             href: The href attribute from the season link.
@@ -300,8 +307,8 @@ class SeasonDiscoverer:
         # Try single year format: -2018/
         single_match = re.search(r"-(\d{4})/?$", href)
         if single_match:
-            end_year = int(single_match.group(1))
-            return end_year - 1, end_year
+            year = int(single_match.group(1))
+            return year, year
 
         return None, None
 

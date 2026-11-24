@@ -2,6 +2,24 @@
 test_season_model.py — Unit tests for SeasonRecord and SeasonStatus.
 """
 
+import pytest
+
+from african_football.models.season_model import season_label
+
+
+class TestSeasonLabel:
+    """season_label gives one label style for all sources."""
+
+    def test_season_across_two_years(self):
+        assert season_label(2023, 2024) == "2023/2024"
+
+    def test_calendar_year_season(self):
+        assert season_label(2019, 2019) == "2019"
+
+    def test_not_a_season(self):
+        with pytest.raises(ValueError, match="2019 to 2021"):
+            season_label(2019, 2021)
+
 
 class TestSeasonRecordIsScrapeable:
     """Tests for the is_scrapeable predicate."""

@@ -17,7 +17,7 @@ from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord, SeasonStatus
 from african_football.scraping.scraper import FootballScraper
 from african_football.scraping.season_discoverer import SeasonDiscoverer
-from african_football.utils.file_saver import save_json, save_txt
+from african_football.utils.file_saver import build_season_str, save_json, save_txt
 from african_football.utils.logger import PipelineLogger
 from african_football.utils.team_normalizer import TeamNormalizer
 
@@ -127,7 +127,7 @@ async def _scrape_season_async(league_dict: dict, season_dict: dict) -> dict[str
 
     # Normalise team names
     canonical_path = Path(CANONICAL_TEAMS_DIR) / f"{league.country}_{league.code}.yaml"
-    season_string = f"{season.start_year}-{str(season.end_year)[-2:]}"
+    season_string = build_season_str(season.start_year, season.end_year)
 
     if canonical_path.exists():
         review_log = (

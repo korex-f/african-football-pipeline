@@ -9,11 +9,11 @@ save_json and save_txt integration is covered in integration tests.
 from african_football.models.league_model import LeagueConfig
 from african_football.utils.file_saver import (
     _build_json_path,
-    _build_season_str,
     _build_txt_path,
     _compute_checksum,
     _format_round_header,
     _format_score,
+    build_season_str,
 )
 
 # ------------------------------- Season String --------------------------------------
@@ -23,9 +23,23 @@ class TestBuildSeasonString:
     """Test for the season string formatter."""
 
     def test_returns_short_end_year(self):
-        assert _build_season_str(2024, 2025) == "2024-25"
-        assert _build_season_str(2019, 2020) == "2019-20"
-        assert _build_season_str(2012, 2013) == "2012-13"
+        assert build_season_str(2024, 2025) == "2024-25"
+        assert build_season_str(2019, 2020) == "2019-20"
+        assert build_season_str(2012, 2013) == "2012-13"
+
+    def test_calendar_year_season_has_the_year_only(self):
+        assert build_season_str(2019, 2019) == "2019"
+
+
+class TestCalendarYearFileNames:
+    """A calendar-year season gets its year as the file name."""
+
+    def test_json_path(self, nigeria_npfl, tmp_path):
+        assert _build_json_path(nigeria_npfl, 2019, 2019, tmp_path).name == "2019.json"
+
+    def test_txt_path(self, nigeria_npfl, tmp_path):
+        path = _build_txt_path(nigeria_npfl, 2019, 2019, tmp_path)
+        assert path.name == "2019_ng1.txt"
 
 
 # ------------------------------- Path Builders ---------------------------------------
