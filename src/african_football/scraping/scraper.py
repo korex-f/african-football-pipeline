@@ -6,11 +6,16 @@ Since version 1.1.0, it does not read the pages itself. It uses these parts:
 
     1. SoccerwayAdapter.fetch: gets the pages into the raw store.
     2. SoccerwayAdapter.parse: makes SourceMatch records from the stored pages.
-    3. The legacy exporter:    makes the match dictionaries of the JSON files.
+    3. RunRecorder.load:       writes the run, the pages and the matches to
+                               the pipeline database (db/loader.py).
+    4. read_season_matches:    reads the matches of the run back from the
+                               database (db/reader.py).
+    5. The legacy exporter:    makes the match dictionaries of the JSON files
+                               from the matches of step 4.
 
-If the scraper has a database URL, it also writes the run, the stored pages
-and the matches to the pipeline database (db/loader.py). Without a database
-URL, it logs a warning and does not use the database.
+Since roadmap step 3, part 3, the database is the single source of truth:
+the exports show what the database has. Thus the scraper needs a database
+URL.
 
 The output has the same format as before. The roadmap step 6 (Source
 Manager) will replace this class.
@@ -22,7 +27,7 @@ Typical usage:
         data = await scraper.scrape()
 """
 
-from contextlib import AsyncExitStack, ExitStack
+from contextlib import AsyncExitStack
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -30,6 +35,7 @@ from typing import Any, Optional
 import psycopg
 
 from african_football.db.loader import LoadSummary, RunRecorder
+from african_football.db.reader import read_season_matches
 from african_football.exports.legacy import to_legacy_stages
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord
@@ -57,8 +63,10 @@ class FootballScraper:
         logger:   The pipeline logger.
         headless: Run the browser without a window.
         raw_root: The root folder of the raw store.
-        database_url: The URL of the pipeline database, or None. With None,
-                  the scraper does not write to the database.
+        database_url: The URL of the pipeline database. It is necessary.
+                  The type is Optional because callers give
+                  os.environ.get("DATABASE_URL"). With None, __init__
+                  raises ValueError.
         stats:    The statistics of the last scrape.
         load_summary: What the last scrape wrote to the database, or None.
     """
@@ -77,7 +85,12 @@ class FootballScraper:
         self.logger = logger
         self.headless = headless
         self.raw_root = Path(raw_root)
-        self.database_url = database_url
+        if not database_url:
+            raise ValueError(
+                "FootballScraper needs the pipeline database. Set DATABASE_URL, "
+                "for example with 'uv run --env-file .env ...'."
+            )
+        self.database_url: str = database_url
         self.load_summary: Optional[LoadSummary] = None
         self._stack: Optional[AsyncExitStack] = None
         self._adapter: Optional[SoccerwayAdapter] = None
@@ -140,36 +153,29 @@ class FootballScraper:
             self.raw_root, source.name, self.league.code, self.season.season
         )
 
-        with ExitStack() as database:
-            recorder: Optional[RunRecorder] = None
-            if self.database_url:
-                # autocommit=True: RunRecorder needs it (see db/loader.py).
-                conn = database.enter_context(
-                    psycopg.connect(self.database_url, autocommit=True)
-                )
-                recorder = RunRecorder.start(
-                    conn, self.league, self.season, source.name, PIPELINE_VERSION
-                )
-            else:
-                self.logger.log(
-                    "DATABASE_URL is not set. The run is not written to the database.",
-                    level="WARNING",
-                )
+        # autocommit=True: RunRecorder needs it (see db/loader.py).
+        with psycopg.connect(self.database_url, autocommit=True) as conn:
+            recorder = RunRecorder.start(
+                conn, self.league, self.season, source.name, PIPELINE_VERSION
+            )
 
             # BaseException, not Exception: the run must also show 'failed'
             # if a person stops it (Ctrl+C) or Airflow cancels the task.
             try:
                 documents = await source.fetch(self.league, self.season, store)
-                source_matches = source.parse(
-                    self.league, self.season, documents, store
-                )
-                if recorder is not None:
-                    self.load_summary = recorder.load(documents, source_matches)
-                    self._log_load_summary(self.load_summary)
+                parsed = source.parse(self.league, self.season, documents, store)
+                self.load_summary = recorder.load(documents, parsed)
             except BaseException as error:
-                if recorder is not None:
-                    self._record_failure(recorder, error)
+                self._record_failure(recorder, error)
                 raise
+            self._log_load_summary(self.load_summary)
+
+            # The exports use the matches from the database, not the parsed
+            # matches in memory. The run is 'succeeded' at this point: an
+            # error here is an export error, not a collection error.
+            source_matches = read_season_matches(
+                conn, self.league.code, self.season.season, source.name
+            )
 
         stages_data = to_legacy_stages(source_matches)
 
@@ -208,6 +214,13 @@ class FootballScraper:
             f"{summary.documents_new} new pages, "
             f"{summary.pages_fetched} pages fetched in this run",
             level="SUCCESS",
+        )
+        self.logger.log(
+            f"Coverage: {summary.coverage_status} "
+            f"({summary.matches_parsed} matches, {summary.expected_matches} expected)",
+            level="SUCCESS"
+            if summary.coverage_status in ("complete_single_source", "verified")
+            else "WARNING",
         )
         if summary.matches_not_seen:
             self.logger.log(

@@ -24,3 +24,4 @@ Each file is one decision. A decision file is not deleted. If the project change
 | 16 | [The database repeats the simple rules of SourceMatch](0016-database-repeats-sourcematch-rules.md) |
 | 17 | [sqlfluff formats the SQL files](0017-sqlfluff-formats-sql.md) |
 | 18 | [The loader records each run in three transactions, and keeps the matches that the source stops to show](0018-loader-records-each-run.md) |
+| 19 | [The exports read from the database, and the coverage uses n × (n − 1)](0019-exports-read-from-the-database.md) |

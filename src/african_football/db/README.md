@@ -7,6 +7,7 @@ This folder has the code that writes to the pipeline database (PostgreSQL 18). F
 | `migrations/001_initial.sql` | The first schema: six tables with constraints ([decision 16](../../../docs/decisions/0016-database-repeats-sourcematch-rules.md)) |
 | `migrate.py` | Applies the new migration files, and records them in `schema_migrations` ([decision 15](../../../docs/decisions/0015-plain-sql-migrations-not-alembic.md)) |
 | `loader.py` | Writes one collection run: the league, the season, the run, the stored pages and the matches ([decision 18](../../../docs/decisions/0018-loader-records-each-run.md)) |
+| `reader.py` | Reads the matches of the latest succeeded run of a season for the exports ([decision 19](../../../docs/decisions/0019-exports-read-from-the-database.md)) |
 
 The sections below explain the techniques in this code. Each section gives what the technique is, why the code uses it, and how. The examples use the tables of `001_initial.sql`.
 
@@ -155,9 +156,88 @@ conn.execute(f"SELECT * FROM seasons WHERE label = '{label}'")     # type error
 
 **How:** Catch `BaseException` only to record the failure, and always raise the error again. If the record of the failure also fails, for example because the database stopped, the scraper logs this second error. Then it raises the first error, because the first error is the cause.
 
-## 10. How the tests use the database
+## 10. A subquery that finds the latest run
+
+**What:** `read_season_matches()` gives the matches of the latest succeeded run only:
+
+```sql
+SELECT ... FROM source_matches m JOIN seasons s USING (season_id)
+WHERE s.league_code = %(league_code)s AND s.label = %(season)s
+  AND m.last_run_id = (
+      SELECT max(r.run_id) FROM collection_runs r
+      WHERE r.season_id = s.season_id
+        AND r.source = %(source)s
+        AND r.status = 'succeeded')
+ORDER BY m.page_position, m.source_match_id;
+```
+
+**Why:** The loader keeps the matches that a later run did not find ([decision 18](../../../docs/decisions/0018-loader-records-each-run.md)). The export must show what the source shows now. Only the matches of the latest succeeded run have its `run_id` in `last_run_id`.
+
+**How:**
+- The subquery uses `s.season_id` of the outer query. This is a *correlated subquery*: PostgreSQL calculates it for the season of the outer row.
+- `run_id` is an identity column, thus a larger `run_id` is a later run. `max(run_id)` is the latest run.
+- `status = 'succeeded'` is necessary. Without it, a failed run is the latest run. It has no matches, and the export is empty. A deliberate break proved this: `test_failed_run_does_not_change_the_export` failed.
+- `USING (season_id)` is a short form of `ON m.season_id = s.season_id` for a column with the same name in the two tables.
+- `%(name)s` placeholders take a dictionary. One value can be used two times in the SQL, for example `%(source)s`.
+- A table has no row sequence. Without `ORDER BY`, the sequence can change after an update. `source_match_id` is the second sort key, thus two matches with the same `page_position` always have the same sequence.
+
+## 11. Data from the database is checked again
+
+**What:** The reader makes a `SourceMatch` from each row. Pydantic checks it again.
+
+**Why:** The database constraints have only the simple rules ([decision 16](../../../docs/decisions/0016-database-repeats-sourcematch-rules.md)). A manual change in `psql` can make a row that the constraints accept, but that is not a valid match, for example a shootout after a 2-1 result. Such a row causes a `ValidationError`. It does not go into a file.
+
+**How:** `SourceMatch` is strict, thus it does not change types. The reader changes two values:
+- `MatchStatus(status)`: the column is `text`, and a strict model does not accept a `str` for an enum.
+- `tuple(raw_documents)`: psycopg gives a PostgreSQL array as a `list`.
+
+The test `test_read_gives_back_the_loaded_matches` loads matches with all the special values (a shootout, a walkover, a postponed match, a kick-off time) and compares the result of the reader with `==`. `SourceMatch` is frozen, thus `==` compares all the fields.
+
+## 12. A CTE and UNION to count the teams
+
+**What:** The coverage SQL counts the different teams of a run:
+
+```sql
+WITH run_matches AS (
+    SELECT home_team_raw, away_team_raw, status
+    FROM source_matches WHERE last_run_id = %(run_id)s
+),
+teams AS (
+    SELECT home_team_raw AS team FROM run_matches
+    UNION
+    SELECT away_team_raw FROM run_matches
+)
+SELECT count(*) FROM teams;
+```
+
+**Why:** A team plays at home and away. The number of teams *n* gives the expected number of matches, *n × (n − 1)* ([decision 19](../../../docs/decisions/0019-exports-read-from-the-database.md)).
+
+**How:**
+- `WITH name AS (...)` is a *common table expression* (CTE): a named query that the next parts use as a table. It makes a long query easier to read.
+- `UNION` removes the duplicate rows. `UNION ALL` keeps them. With `UNION ALL`, each team counts once for each match.
+
+## 13. A conditional upsert: `DO UPDATE ... WHERE`
+
+**What:**
+
+```sql
+INSERT INTO season_coverage (...) SELECT ...
+ON CONFLICT (season_id) DO UPDATE SET status = EXCLUDED.status, ...
+WHERE season_coverage.status <> 'verified'
+RETURNING expected_matches, status;
+```
+
+**Why:** [Decision 7](../../../docs/decisions/0007-testable-definition-of-verified.md): data of one source never replaces a verified season.
+
+**How:**
+- The `WHERE` of `DO UPDATE` applies to the row in the table. If it is false, PostgreSQL does not change the row.
+- Then `RETURNING` gives **no row**, the same as `DO NOTHING` ([section 2](#2-do-update-or-do-nothing-and-returning)). The loader then reads the coverage with a `SELECT`.
+- `fail()` uses `DO NOTHING`: a failed run writes the status `failed` only for a season that has no coverage. Thus a failed run does not remove the result of an earlier run.
+
+## 14. How the tests use the database
 
 - **One database for each test.** The fixture `empty_database` (`tests/conftest.py`) makes a new database with a random name, and removes it after the test (`DROP DATABASE ... WITH (FORCE)`). `pipeline_database` also applies the migrations. Thus a test cannot change the data of a different test or of `football`.
 - **A database constraint tested from Python.** `SourceMatch` does not allow a bad match. `model_copy(update={...})` makes a copy without the Pydantic checks, thus the test can give a bad match to the database, and the `CHECK` constraint must stop it.
 - **A fake adapter.** The scraper tests give `FootballScraper` an object with the adapter methods, and fixed data. They do not use a browser or the network.
-- **Deliberate breaks.** For each important line, the project broke the code on purpose, and one test had to fail. For the loader: the transaction of `load()`, `IS DISTINCT FROM`, the `CASE` of `updated_at`, `BaseException`, and the count of `pages_fetched`.
+- **A test that proves the data path.** `test_scraper_exports_the_matches_from_the_database` replaces `read_season_matches` with a function that gives a different match than the parser. The output must show the match of the reader. Without this test, an export from the matches in memory gives the same output, and no test fails.
+- **Deliberate breaks.** For each important line, the project broke the code on purpose, and one test had to fail. For the loader: the transaction of `load()`, `IS DISTINCT FROM`, the `CASE` of `updated_at`, `BaseException`, and the count of `pages_fetched`. For the reader and the coverage: the export from memory, the `last_run_id` filter, `status = 'succeeded'`, `page_position`, the `WHERE` of the conditional upsert, `DO NOTHING` in `fail()`, and the count of postponed matches.

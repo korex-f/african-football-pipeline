@@ -2,6 +2,47 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: The exports read from the database (roadmap step 3, part 3)
+
+**What happened:** The JSON and TXT exports now use the matches from the database. `FootballScraper` writes the run, reads the matches back, and makes the files from them. Each run also writes the coverage of the season. The pipeline needs the database now. The output did not change. Roadmap step 3 is complete.
+
+**Why it was necessary:** [Decision 5](docs/decisions/0005-postgresql-after-source-neutral-model.md) makes PostgreSQL the single source of truth. Before this change, the files came from the data in memory, thus they could show data that the database did not have.
+
+**How the project did it:**
+
+- `db/reader.py`: `read_season_matches()` gives the matches of the latest succeeded run, in the sequence of the results page, as `SourceMatch` records ([decision 19](docs/decisions/0019-exports-read-from-the-database.md)).
+- `db/loader.py`: `load()` writes `season_coverage` in its transaction: expected = n × (n − 1) for n teams, found = the played and awarded matches. `fail()` writes `failed` only for a season without coverage. A `verified` season does not change.
+- `FootballScraper`: the database URL is necessary. The export uses the matches from `read_season_matches()`.
+- `main.py` stops before its menus if `DATABASE_URL` is not set.
+- The new SQL techniques are in [src/african_football/db/README.md](src/african_football/db/README.md): the correlated subquery for the latest run, a CTE with `UNION`, and the conditional upsert (`DO UPDATE ... WHERE`).
+
+**Verification:**
+
+1. **Live run (the baseline).** The code of part 2 scraped Ghana 2023/24 into `data/sources/` and into the database: 306 matches, 305 halftime scores (the other match is awarded), 0 network errors, 1,304 seconds. This was also the first live run of the loader: 306 new matches and 306 new pages. The output is the baseline (`data/baselines/gh_pl_2023-24_v1.1.0.json`).
+2. **Database round trip.** The reader read the 306 matches of the live run from the database. The legacy exporter made the stages. Comparison with the baseline: 306 matches, 4,590 fields, **0 differences**.
+3. **The comparison can fail.** With one halftime score changed, the comparison found exactly 1 difference.
+4. **The new scraper, offline.** The new `FootballScraper` ran on the raw store into a new empty database: 0 pages from the network, 51 seconds, 4,590 fields, **0 differences**. The coverage: 306 expected, `complete_single_source`.
+5. 15 new tests (`tests/integration/test_reader.py`, and changed tests in `test_loader.py` and `test_soccerway_adapter.py`). The adapter test now goes from the fixture pages through the database to the output.
+6. Deliberate breaks. Each break made the correct test fail:
+
+   | Break | Test that failed |
+   |---|---|
+   | Export the parsed matches, not the matches from the database | `test_scraper_exports_the_matches_from_the_database` |
+   | No `last_run_id` filter in the reader | `test_read_gives_only_the_matches_of_the_latest_run` |
+   | No `status = 'succeeded'` in the reader | `test_failed_run_does_not_change_the_export` |
+   | No `page_position` in `ORDER BY` | `test_read_keeps_the_page_sequence` |
+   | No `WHERE` in the coverage upsert | `test_single_source_never_replaces_verified` |
+   | `DO UPDATE` in place of `DO NOTHING` in `fail()` | `test_failed_run_keeps_the_coverage_of_an_earlier_run` |
+   | Postponed matches counted as found | `test_coverage_does_not_count_a_postponed_match` |
+
+7. 242 tests pass. basedpyright gives 0 errors.
+
+**Trade-offs:**
+
+- The pipeline needs Docker and the database, also for one season.
+- The coverage rule *n × (n − 1)* is correct only for a double round-robin league. Other formats show `incomplete` until the value for each season comes into the configuration (roadmap step 5).
+- The matches that a later run did not find are not exported. A person must examine them in the database (the query is in `docs/database.md`).
+
 ## November 2026: The loader writes each run to the database (roadmap step 3, part 2)
 
 **What happened:** When `DATABASE_URL` is set, `FootballScraper` now writes each scrape to the pipeline database: the league, the season, the run, the stored pages and the matches. A new scrape updates the matches. The JSON and TXT exports did not change. They still come from the scraper output.

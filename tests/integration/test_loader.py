@@ -20,6 +20,7 @@ from african_football.db.loader import RunRecorder
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord, SeasonStatus
 from african_football.models.source_match import MatchStatus, SourceMatch
+from african_football.scraping import scraper as scraper_module
 from african_football.scraping.scraper import PIPELINE_VERSION, FootballScraper
 from african_football.sources.base import RawDocument
 from african_football.utils.logger import PipelineLogger
@@ -374,15 +375,30 @@ def test_scraper_marks_a_failed_run(pipeline_database, ghana_pl, logger, tmp_pat
         )
 
 
-def test_scraper_without_database_url(pipeline_database, ghana_pl, logger, tmp_path):
-    scraper = _scraper(ghana_pl, logger, tmp_path, FakeAdapter([_match("m1")]), None)
+def test_scraper_without_database_url_stops(ghana_pl, logger, tmp_path):
+    # Since step 3, part 3, the exports come from the database. Thus the
+    # scraper stops before it starts the browser.
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        _scraper(ghana_pl, logger, tmp_path, FakeAdapter([_match("m1")]), None)
+
+
+def test_scraper_exports_the_matches_from_the_database(
+    pipeline_database, ghana_pl, logger, tmp_path, monkeypatch
+):
+    # The reader gives a different match than the parser. The output must
+    # show the match of the reader: the export comes from the database.
+    monkeypatch.setattr(
+        scraper_module,
+        "read_season_matches",
+        lambda conn, league_code, season, source: [_match("from_database")],
+    )
+    adapter = FakeAdapter([_match("from_parser")])
+    scraper = _scraper(ghana_pl, logger, tmp_path, adapter, pipeline_database)
 
     data = asyncio.run(scraper.scrape())
 
-    assert data["total_matches"] == 1
-    assert scraper.load_summary is None
-    with psycopg.connect(pipeline_database) as conn:
-        assert _one(conn, "SELECT count(*) FROM collection_runs") == (0,)
+    [stage] = data["stages"]
+    assert [m["home_team"] for m in stage["matches"]] == ["Home from_database"]
 
 
 def test_scraper_marks_a_cancelled_run(pipeline_database, ghana_pl, logger, tmp_path):
