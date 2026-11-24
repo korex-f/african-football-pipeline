@@ -2,6 +2,45 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: The loader writes each run to the database (roadmap step 3, part 2)
+
+**What happened:** When `DATABASE_URL` is set, `FootballScraper` now writes each scrape to the pipeline database: the league, the season, the run, the stored pages and the matches. A new scrape updates the matches. The JSON and TXT exports did not change. They still come from the scraper output.
+
+**Why it was necessary:** Part 3 makes the exports from the database. The database must first have the matches, and a record of each run. The run record also shows the runs that failed or stopped, which the log files showed before.
+
+**How the project did it:**
+
+- `db/loader.py`: `RunRecorder` with `start()`, `load()` and `fail()`, and `LoadSummary` ([decision 18](docs/decisions/0018-loader-records-each-run.md)). Three transactions for each run.
+- `FootballScraper` has a new parameter `database_url`. `main.py` and the Airflow task give it `DATABASE_URL`. Without it, the scraper logs a warning and works as before.
+- `page_position` records the sequence of each match on the results page. The exports of part 3 need it.
+- The log shows what the run wrote: new and changed matches, new pages, and the matches that the source does not show now.
+- The techniques are in [src/african_football/db/README.md](src/african_football/db/README.md): the upsert, `xmax = 0`, `IS DISTINCT FROM`, `now()` and `clock_timestamp()`, `LiteralString`.
+- `docs/database.md`: how runs are recorded, and four queries for the runs and the matches.
+
+**Verification:**
+
+1. 16 new tests (`tests/integration/test_loader.py`) on a new database for each test. The scraper tests use a fake adapter, thus they do not need a browser.
+2. Deliberate breaks. Each break made exactly one test fail:
+
+   | Break | Test that failed |
+   |---|---|
+   | `load()` without its transaction | `test_failed_load_writes_nothing` |
+   | `updated_at = now()` on each run | `test_second_run_with_the_same_data_changes_nothing` |
+   | `<>` in place of `IS DISTINCT FROM` | `test_changed_match_is_updated` |
+   | `except Exception` in place of `BaseException` | `test_scraper_marks_a_cancelled_run` |
+   | `pages_fetched` counts all pages | `test_pages_fetched_counts_only_the_pages_of_this_run` |
+
+3. The SQL facts in the module README were checked in `psql`: the `NULL` comparisons, `xmax` after an insert and after an update, and `now()` after a 0.2 second wait.
+4. A load of 306 matches (the size of a Ghana season) takes 0.5 seconds.
+5. The four queries in `docs/database.md` gave the expected rows on a database with a succeeded, a changed, a failed and a running run.
+6. 227 tests pass. basedpyright gives 0 errors, without `# pyright: ignore`.
+
+**Trade-offs:**
+
+- The database is optional until part 3. A run without `DATABASE_URL` is not in the database.
+- The matches that the source does not show again stay in the database. A person must examine them (the query is in `docs/database.md`).
+- The scraper uses a synchronous connection in an async method. For one season at a time, this is sufficient.
+
 ## November 2026: The pipeline database and the migration runner (roadmap step 3, part 1)
 
 **What happened:** The project added the pipeline database, its first schema and a migration runner. CI now runs the database tests against PostgreSQL 18. The pipeline does not write to the database yet, thus the output did not change.

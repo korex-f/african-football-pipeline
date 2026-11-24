@@ -11,6 +11,7 @@ Typical usage:
 """
 
 import asyncio
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -220,7 +221,13 @@ async def retry_scrape(
             await asyncio.sleep(delay)
 
         try:
-            async with FootballScraper(league, season, logger, headless) as scraper:
+            async with FootballScraper(
+                league,
+                season,
+                logger,
+                headless,
+                database_url=os.environ.get("DATABASE_URL"),
+            ) as scraper:
                 data = await scraper.scrape()
                 report = scraper.get_statistics_report()
                 return data, report

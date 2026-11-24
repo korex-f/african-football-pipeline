@@ -7,6 +7,7 @@ DAG parsing lightweight.
 """
 
 import asyncio
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -115,7 +116,12 @@ async def _scrape_season_async(league_dict: dict, season_dict: dict) -> dict[str
 
     # Scrape
     async with FootballScraper(
-        league, season, logger, headless=True, raw_root=Path(DATA_SOURCES_DIR)
+        league,
+        season,
+        logger,
+        headless=True,
+        raw_root=Path(DATA_SOURCES_DIR),
+        database_url=os.environ.get("DATABASE_URL"),
     ) as scraper:
         data = await scraper.scrape()
 
