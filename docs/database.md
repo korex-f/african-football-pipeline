@@ -35,8 +35,9 @@ Do not change a file after the runner applied it. The runner records the sha256 
 - `collection_runs`: one row for each run, with the status `running`, `succeeded` or `failed`.
 - `raw_documents`: one row for each stored page (the HTML stays in `data/sources/`).
 - `source_matches`: one row for each match. A new run updates the row.
+- `season_coverage`: one row for each season: the expected matches (n × (n − 1) for n teams), the found matches, and a status.
 
-Without `DATABASE_URL`, the scraper logs a warning and does not use the database. To use the database with the CLI:
+The exports (JSON and TXT) use the matches of the latest succeeded run, in the sequence of the results page ([decision 19](decisions/0019-exports-read-from-the-database.md)). Thus the pipeline needs the database. Run the CLI with the settings file:
 
 ```bash
 uv run --env-file .env python main.py
@@ -73,3 +74,10 @@ ORDER BY updated_at DESC;
 ```
 
 For the SQL techniques of the loader (the upsert, `xmax = 0`, `IS DISTINCT FROM`), refer to the [db module README](../src/african_football/db/README.md).
+
+```sql
+-- The coverage of each season
+SELECT s.league_code, s.label, c.expected_matches, c.found_matches, c.status, c.updated_at
+FROM season_coverage c JOIN seasons s USING (season_id)
+ORDER BY s.league_code, s.label;
+```

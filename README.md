@@ -146,18 +146,18 @@ The pipeline database is a PostgreSQL 18 container (`pipeline-db`, `localhost:54
 ### Running the Pipeline
 
 ```bash
-uv run python main.py
-
-# Also write each run to the pipeline database
+# The pipeline database must run (docker compose up -d)
 uv run --env-file .env python main.py
 ```
+
+The pipeline writes each run to the database, and makes the JSON and TXT files from the matches in the database. Without `DATABASE_URL`, `main.py` stops with a message.
 
 The CLI presents interactive menus:
 
 1. **Select leagues** — pick one, multiple (`1,3,5`), a range (`1-5`), or all (`all`)
 2. **For each league**, the pipeline discovers available seasons from Soccerway's archive
 3. **Select seasons** — same flexible input format
-4. **Pipeline runs**: scrape → normalise → save → report statistics
+4. **Pipeline runs**: scrape → write to the database → read back → normalise → save → report statistics
 
 ### Example Output
 
@@ -302,7 +302,7 @@ At the end of each step, the pipeline works.
 |---|---|---|
 | 1 | Repair the Soccerway scraper with stable selectors and saved-page fixtures | ✅ Done |
 | 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | ✅ Done |
-| 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | In progress: parts 1 and 2 of 3 done (database, schema, migrations, loader) |
+| 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | ✅ Done |
 | 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | Planned |
 | 5 | Add reconciliation between sources, validation rules, and season statuses | Planned |
 | 6 | Add the Source Manager with fallback and resume. The Airflow DAG calls the library. | Planned |
