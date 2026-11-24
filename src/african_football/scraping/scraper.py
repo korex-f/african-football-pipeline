@@ -44,7 +44,7 @@ from african_football.sources.raw_store import RawStore
 from african_football.sources.soccerway.adapter import SoccerwayAdapter
 from african_football.utils.logger import PipelineLogger
 
-PIPELINE_VERSION = "1.1.0"
+PIPELINE_VERSION = "1.2.0"
 
 # The default folder of the raw store, relative to the working directory.
 DEFAULT_RAW_ROOT = Path("data/sources")

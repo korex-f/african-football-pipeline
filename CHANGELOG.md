@@ -2,6 +2,29 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: Correct labels for calendar-year seasons (version 1.2.0)
+
+**What happened:** The Soccerway discoverer gave a calendar-year season a label with two years. For example, the NPFL 2019 season (January to July 2019) had the label `2018/2019`. Now it has the label `2019`, and its files are `2019.json` and `2019_ng1.txt`. `PIPELINE_VERSION` is now `1.2.0`.
+
+**Why it was necessary:** The RSSSF adapter (roadmap step 4) must give each season the same label as Soccerway ([decision 20](docs/decisions/0020-one-season-label-style-for-all-sources.md)). RSSSF calls this season `2019`.
+
+**How the project did it:**
+
+- `season_label()` in `models/season_model.py` makes all season labels.
+- `SeasonDiscoverer._parse_years_from_href()` gives `(2019, 2019)` for `npfl-2019`, not `(2018, 2019)`.
+- `build_season_str()` (before: `_build_season_str()`) gives `2019` for a calendar-year season. `main.py` and the Airflow tasks use it, not their own copy of the rule.
+
+**Verification:**
+
+1. The discoverer ran on the live Soccerway archive. Before the change: 12 NPFL seasons and 2 Ghana seasons had a wrong label. After the change: NPFL `2019`, `2018`, ..., `2012`, `2007`, `2006`, `2005` and Ghana `2018`, `2017`. These are the same labels as on RSSSF.
+2. The old unit test expected the wrong rule (`2018` gave `2017` as its start year). The test now expects `(2018, 2018)`. With the old rule put back on purpose, the two single-year tests failed.
+3. New tests for `season_label()` and for the file names of a calendar-year season. 248 tests pass.
+
+**Trade-offs:**
+
+- The 14 seasons get new file names. Files from before version 1.2.0 keep their old names.
+- Soccerway `npfl-2022-2023` and RSSSF `2023` are the same season with different labels. Step 5 must connect them.
+
 ## November 2026: The exports read from the database (roadmap step 3, part 3)
 
 **What happened:** The JSON and TXT exports now use the matches from the database. `FootballScraper` writes the run, reads the matches back, and makes the files from them. Each run also writes the coverage of the season. The pipeline needs the database now. The output did not change. Roadmap step 3 is complete.

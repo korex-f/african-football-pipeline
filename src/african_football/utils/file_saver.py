@@ -37,7 +37,7 @@ PLAYOFF_ROUND_ORDER: dict[str, int] = {
 }
 
 
-def _build_season_str(start_year: int, end_year: int) -> str:
+def build_season_str(start_year: int, end_year: int) -> str:
     """
     Build a standardised season string for use in file names.
 
@@ -46,8 +46,12 @@ def _build_season_str(start_year: int, end_year: int) -> str:
         end_year:   The year the season ends (e.g. 2025).
 
     Returns:
-        A season string in the format '2024-25'.
+        '2024-25' for a season that crosses into the next year, or '2019' for
+        a calendar-year season. main.py and the Airflow tasks use this
+        function too, thus all file names of a season agree.
     """
+    if start_year == end_year:
+        return str(start_year)
     return f"{start_year}-{str(end_year)[-2:]}"
 
 
@@ -86,7 +90,7 @@ def _build_json_path(
     Returns:
         A Path object for the JSON output file.
     """
-    season_str = _build_season_str(start_year, end_year)
+    season_str = build_season_str(start_year, end_year)
     return Path(base_dir) / league.country / league.code / f"{season_str}.json"
 
 
@@ -108,7 +112,7 @@ def _build_txt_path(
     Returns:
         A Path object for the TXT output file.
     """
-    season_str = _build_season_str(start_year, end_year)
+    season_str = build_season_str(start_year, end_year)
     filename = (
         f"{season_str}_{league.submission_code}.txt"
         if league.submission_code

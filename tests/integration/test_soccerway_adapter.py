@@ -19,7 +19,7 @@ import pytest
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord, SeasonStatus
 from african_football.models.source_match import MatchStatus
-from african_football.scraping.scraper import FootballScraper
+from african_football.scraping.scraper import PIPELINE_VERSION, FootballScraper
 from african_football.sources.raw_store import RawStore
 from african_football.sources.soccerway import adapter as adapter_module
 from african_football.sources.soccerway.adapter import SoccerwayAdapter
@@ -229,7 +229,7 @@ def test_football_scraper_uses_the_stored_pages(
     data = asyncio.run(scrape())
 
     assert data["total_matches"] == 3
-    assert data["pipeline_version"] == "1.1.0"
+    assert data["pipeline_version"] == PIPELINE_VERSION
     [stage] = data["stages"]
     assert stage["stage_name"] == "NPFL"
     first = stage["matches"][0]

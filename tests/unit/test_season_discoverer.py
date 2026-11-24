@@ -26,11 +26,13 @@ class TestParseYearsFromHref:
         assert end == 2025
 
     # Single year format
-    def test_single_year_derives_start_as_year_minus_one(self):
+    def test_single_year_is_a_calendar_year_season(self):
+        # npfl-2019 is the 2019 season (January to July 2019). Before version
+        # 1.2.0 this gave (2018, 2019), thus the label '2018/2019'.
         start, end = SeasonDiscoverer._parse_years_from_href(
             "/south-africa/betway-premiership-2018/"
         )
-        assert start == 2017
+        assert start == 2018
         assert end == 2018
 
     # Edge cases
@@ -51,7 +53,7 @@ class TestParseYearsFromHref:
 
     def test_single_year_without_trailing_slash(self):
         start, end = SeasonDiscoverer._parse_years_from_href("/nigeria/npfl-2019")
-        assert start == 2018
+        assert start == 2019
         assert end == 2019
 
 

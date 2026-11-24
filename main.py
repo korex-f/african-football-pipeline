@@ -22,7 +22,7 @@ from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord
 from african_football.scraping.scraper import FootballScraper
 from african_football.scraping.season_discoverer import SeasonDiscoverer
-from african_football.utils.file_saver import save_json, save_txt
+from african_football.utils.file_saver import build_season_str, save_json, save_txt
 from african_football.utils.logger import PipelineLogger
 from african_football.utils.team_normalizer import TeamNormalizer
 
@@ -281,7 +281,7 @@ def normalise_team_names(
         )
         return data
 
-    season_str = f"{season.start_year}-{str(season.end_year)[-2:]}"
+    season_str = build_season_str(season.start_year, season.end_year)
     review_log_path = (
         Path("data/logs/unmatched_teams")
         / f"{league.country}_{league.code}_{season_str}.txt"
