@@ -14,6 +14,7 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
+from african_football.db.migrate import migrate
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord, SeasonStatus
 
@@ -185,3 +186,14 @@ def empty_database(database_url: str) -> Iterator[str]:
             admin.execute(
                 sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name))
             )
+
+
+@pytest.fixture
+def pipeline_database(empty_database: str) -> str:
+    """Make a new database with all the migrations, and give its URL.
+
+    Use this fixture for the tests that need the pipeline tables.
+    """
+    with psycopg.connect(empty_database, autocommit=True) as conn:
+        migrate(conn)
+    return empty_database

@@ -8,6 +8,10 @@ Since version 1.1.0, it does not read the pages itself. It uses these parts:
     2. SoccerwayAdapter.parse: makes SourceMatch records from the stored pages.
     3. The legacy exporter:    makes the match dictionaries of the JSON files.
 
+If the scraper has a database URL, it also writes the run, the stored pages
+and the matches to the pipeline database (db/loader.py). Without a database
+URL, it logs a warning and does not use the database.
+
 The output has the same format as before. The roadmap step 6 (Source
 Manager) will replace this class.
 
@@ -18,11 +22,14 @@ Typical usage:
         data = await scraper.scrape()
 """
 
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, ExitStack
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+import psycopg
+
+from african_football.db.loader import LoadSummary, RunRecorder
 from african_football.exports.legacy import to_legacy_stages
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord
@@ -50,7 +57,10 @@ class FootballScraper:
         logger:   The pipeline logger.
         headless: Run the browser without a window.
         raw_root: The root folder of the raw store.
+        database_url: The URL of the pipeline database, or None. With None,
+                  the scraper does not write to the database.
         stats:    The statistics of the last scrape.
+        load_summary: What the last scrape wrote to the database, or None.
     """
 
     def __init__(
@@ -60,12 +70,15 @@ class FootballScraper:
         logger: PipelineLogger,
         headless: bool = True,
         raw_root: Path = DEFAULT_RAW_ROOT,
+        database_url: Optional[str] = None,
     ) -> None:
         self.league = league
         self.season = season
         self.logger = logger
         self.headless = headless
         self.raw_root = Path(raw_root)
+        self.database_url = database_url
+        self.load_summary: Optional[LoadSummary] = None
         self._stack: Optional[AsyncExitStack] = None
         self._adapter: Optional[SoccerwayAdapter] = None
         self.stats: dict[str, Any] = {
@@ -126,8 +139,38 @@ class FootballScraper:
         store = RawStore(
             self.raw_root, source.name, self.league.code, self.season.season
         )
-        documents = await source.fetch(self.league, self.season, store)
-        source_matches = source.parse(self.league, self.season, documents, store)
+
+        with ExitStack() as database:
+            recorder: Optional[RunRecorder] = None
+            if self.database_url:
+                # autocommit=True: RunRecorder needs it (see db/loader.py).
+                conn = database.enter_context(
+                    psycopg.connect(self.database_url, autocommit=True)
+                )
+                recorder = RunRecorder.start(
+                    conn, self.league, self.season, source.name, PIPELINE_VERSION
+                )
+            else:
+                self.logger.log(
+                    "DATABASE_URL is not set. The run is not written to the database.",
+                    level="WARNING",
+                )
+
+            # BaseException, not Exception: the run must also show 'failed'
+            # if a person stops it (Ctrl+C) or Airflow cancels the task.
+            try:
+                documents = await source.fetch(self.league, self.season, store)
+                source_matches = source.parse(
+                    self.league, self.season, documents, store
+                )
+                if recorder is not None:
+                    self.load_summary = recorder.load(documents, source_matches)
+                    self._log_load_summary(self.load_summary)
+            except BaseException as error:
+                if recorder is not None:
+                    self._record_failure(recorder, error)
+                raise
+
         stages_data = to_legacy_stages(source_matches)
 
         self.logger.log(f"Found {len(stages_data)} stage(s)")
@@ -156,6 +199,37 @@ class FootballScraper:
         self.season.pipeline_version = PIPELINE_VERSION
 
         return data
+
+    def _log_load_summary(self, summary: LoadSummary) -> None:
+        """Write what the run wrote to the database to the log."""
+        self.logger.log(
+            f"Database: {summary.matches_parsed} matches "
+            f"({summary.matches_new} new, {summary.matches_changed} changed), "
+            f"{summary.documents_new} new pages, "
+            f"{summary.pages_fetched} pages fetched in this run",
+            level="SUCCESS",
+        )
+        if summary.matches_not_seen:
+            self.logger.log(
+                f"Database: {summary.matches_not_seen} matches of this season are "
+                "in the database, but the source does not show them now. "
+                "They stay in the database.",
+                level="WARNING",
+            )
+
+    def _record_failure(self, recorder: RunRecorder, error: BaseException) -> None:
+        """Mark the run 'failed'. Do not hide the first error.
+
+        If the database also fails, log this second error. Then the caller
+        raises the first error, which is the cause of the failure.
+        """
+        try:
+            recorder.fail(error)
+        except psycopg.Error as db_error:
+            self.logger.log(
+                f"Could not mark run {recorder.run_id} as failed: {db_error}",
+                level="ERROR",
+            )
 
     def _halftime_statistics(
         self, stages_data: list[dict[str, Any]], total: int
