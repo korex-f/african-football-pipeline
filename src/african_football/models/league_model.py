@@ -26,6 +26,13 @@ class LeagueConfig:
         fetch_lineups:   Whether to scrape match lineups. Defaults to False.
         fetch_scorers:   Whether to scrape goalscorers. Defaults to False.
         fetch_cards:     Whether to scrape bookings (yellow/red cards). Defaults to False.
+        rsssf_index:     The RSSSF page with the list of champions, relative to
+                         https://www.rsssf.org/, for example 'tablesn/nigchamp.html'.
+                         Empty: the league has no RSSSF source.
+        rsssf_section:   The heading of the list on rsssf_index that is this
+                         league, for example 'National League'. Some pages have
+                         lists of different competitions with the same seasons.
+                         Empty: use all the lists on the page.
     """
 
     code: str
@@ -39,3 +46,5 @@ class LeagueConfig:
     fetch_lineups: bool = False
     fetch_scorers: bool = False
     fetch_cards: bool = False
+    rsssf_index: str = ""
+    rsssf_section: str = ""
