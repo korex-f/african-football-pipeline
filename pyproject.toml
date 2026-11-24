@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.13",
     "playwright>=1.65.1",
+    "psycopg[binary]>=3.3.9",
     "pydantic>=2.12",
     "pyyaml>=6.0.3",
     "requests>=2.32.5",
@@ -19,10 +20,14 @@ dev = [
     "pre-commit>=4.7.0",
     "pytest>=9.0.2",
     "ruff>=0.15.2",
+    "sqlfluff>=4.5.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "db: the test needs Postgres. It is skipped when DATABASE_URL is not set.",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -35,3 +40,27 @@ packages = ["src/african_football"]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "standard"
+
+[tool.sqlfluff.core]
+dialect = "postgres"
+max_line_length = 88
+exclude_rules = "RF04"
+
+[tool.sqlfluff.layout.type.data_type]
+spacing_before = "align"
+align_within = "create_table_statement"
+
+[tool.sqlfluff.rules.capitalisation.keywords]
+capitalisation_policy = "upper"
+
+[tool.sqlfluff.rules.capitalisation.identifiers]
+extended_capitalisation_policy = "lower"
+
+[tool.sqlfluff.rules.capitalisation.functions]
+extended_capitalisation_policy = "lower"
+
+[tool.sqlfluff.rules.capitalisation.literals]
+capitalisation_policy = "upper"
+
+[tool.sqlfluff.rules.capitalisation.types]
+extended_capitalisation_policy = "lower"

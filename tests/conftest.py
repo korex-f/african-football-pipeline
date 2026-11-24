@@ -5,7 +5,14 @@ Fixtures defined here are automatically available to all test modules
 without needing to import them explicitly.
 """
 
+import os
+import uuid
+from collections.abc import Iterator
+
+import psycopg
 import pytest
+from psycopg import sql
+from psycopg.conninfo import make_conninfo
 
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord, SeasonStatus
@@ -134,3 +141,47 @@ def sample_data() -> dict:
             }
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# Database fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def database_url() -> str:
+    """Give the DATABASE_URL of the pipeline database.
+
+    If DATABASE_URL is not set, the test is skipped. Thus the tests that
+    need a database do not fail on a computer without Postgres.
+
+    In CI (the CI variable is set), a missing DATABASE_URL is an error, not
+    a skip. Without this rule, an error in the workflow file can skip all the
+    database tests, and CI still shows a pass.
+    """
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        if os.environ.get("CI"):
+            pytest.fail("DATABASE_URL is not set in CI")
+        pytest.skip("DATABASE_URL is not set")
+    return url
+
+
+@pytest.fixture
+def empty_database(database_url: str) -> Iterator[str]:
+    """Make a new empty database for one test, and give its URL.
+
+    Each test gets its own database. Thus a test cannot change the data of
+    the pipeline database or of a different test. The database is deleted
+    after the test.
+    """
+    name = f"test_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(database_url, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    try:
+        yield make_conninfo(database_url, dbname=name)
+    finally:
+        with psycopg.connect(database_url, autocommit=True) as admin:
+            admin.execute(
+                sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name))
+            )
