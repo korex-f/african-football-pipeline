@@ -2,7 +2,7 @@
 
 This pipeline collects historical football data for African domestic leagues. It collects the match results for each season. It normalises the team names, validates the data, and exports the data as JSON and as OpenFootball text.
 
-The pipeline runs on one local computer. It uses Python, Playwright, and Airflow. PostgreSQL is planned. Cloud platforms are not in the scope of the project at this time. For the reasons, refer to [Architecture Decisions](#architecture-decisions).
+The pipeline runs on one local computer. It uses Python, Playwright, Airflow, and PostgreSQL. The project is changing PostgreSQL into the central store of the pipeline data (roadmap step 3). Cloud platforms are not in the scope of the project at this time. For the reasons, refer to [Architecture Decisions](#architecture-decisions).
 
 The code uses typed Python, automated tests, and conventional commits. The tests include regression tests that use saved copies of web pages.
 
@@ -46,6 +46,10 @@ src/african_football/
 │       └── parser.py             ← Reads stored HTML with BeautifulSoup
 ├── exports/
 │   └── legacy.py                 ← SourceMatch → the current JSON match format
+├── db/
+│   ├── migrate.py                ← Migration runner (python -m african_football.db.migrate)
+│   └── migrations/
+│       └── 001_initial.sql       ← The first schema: six tables
 └── utils/
     ├── logger.py                 ← PipelineLogger (console + file)
     ├── file_saver.py             ← JSON/TXT export with SHA256 checksums
@@ -57,7 +61,10 @@ tools/                            ← Standalone utilities (extract, merge, form
 airflow/
 ├── dags/scrape_leagues.py        ← Thin DAG: load configs → build jobs → scrape (parallel) → summarise
 ├── plugins/pipeline_tasks.py     ← Task logic calling the library
-└── docker-compose.yaml           ← Local Airflow stack
+└── docker-compose.yaml           ← Local Airflow stack (includes the root docker-compose.yaml)
+
+docker-compose.yaml               ← The pipeline database (pipeline-db, PostgreSQL 18)
+.env.example                      ← DATABASE_URL for local work (copy to .env)
 
 tests/
 ├── unit/                         ← Pure-function tests (no browser, no network)
@@ -128,6 +135,7 @@ file_saver ──→ data/raw/{country}/{league}/{season}.json    (immutable, ch
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
+- Docker with Docker Compose 2.20 or later (for the pipeline database)
 
 ### Installation
 
@@ -143,7 +151,46 @@ uv run playwright install chromium
 
 # Install the Git pre-commit hook (do this one time in each clone)
 uv run pre-commit install
+
+# Make your local settings file (do not commit .env)
+cp .env.example .env
+
+# Start the pipeline database and make the tables
+docker compose up -d --wait
+uv run --env-file .env python -m african_football.db.migrate
 ```
+
+### The Pipeline Database
+
+The pipeline database is a PostgreSQL 18 container with the name `pipeline-db`. The root `docker-compose.yaml` defines it. It is not the Airflow metadata database.
+
+| Item | Value |
+|---|---|
+| Address from your computer | `localhost:5433` (only `127.0.0.1`, not the network) |
+| Address from a container in the same Compose project | `pipeline-db:5432` |
+| Database, user, password | `football`, `pipeline`, `pipeline` (local development values, not secrets) |
+| Data | The Docker volume `african-football-pipeline-db` |
+
+`DATABASE_URL` in `.env` gives the connection to the Python code. Commands that need the database use `uv run --env-file .env ...`.
+
+```bash
+# Open a SQL prompt
+psql postgresql://pipeline:pipeline@localhost:5433/football
+
+# Stop the container. The data stays in the volume.
+docker compose down
+```
+
+Do not use `docker compose down -v`. The `-v` option deletes the volume and all the data.
+
+**Migrations.** The schema is in SQL files in `src/african_football/db/migrations/`. The runner applies the new files in the sequence of their versions, and records each file in the table `schema_migrations`. To change the schema:
+
+1. Add a new file with the next version, for example `002_add_teams.sql`. Do not put `BEGIN` or `COMMIT` in the file. The runner applies each file in one transaction.
+2. Run `uv run --env-file .env python -m african_football.db.migrate`.
+
+Do not change a file after the runner applied it. The runner records the sha256 of each file. If an applied file changes, the runner stops with an error.
+
+**Airflow.** `airflow/docker-compose.yaml` includes the root `docker-compose.yaml`. Thus, `docker compose up` in `airflow/` also starts `pipeline-db`, and the Airflow tasks get `DATABASE_URL`. The two Compose projects use the same volume. Run only one `pipeline-db` at a time: do `docker compose down` in the root folder before you start Airflow.
 
 ### Running the Pipeline
 
@@ -188,7 +235,12 @@ uv run pytest tests/unit/ -v
 
 # Integration tests only
 uv run pytest tests/integration/ -v
+
+# All tests, also the database tests (the pipeline database must run)
+uv run --env-file .env pytest -v
 ```
+
+The tests with the `db` marker need PostgreSQL. Without `DATABASE_URL`, pytest skips them. In CI, a missing `DATABASE_URL` is an error, not a skip. Each database test makes a new empty database, and deletes it after the test. Thus, the tests do not change the data in `football`.
 
 The Soccerway tests use saved pages in `tests/fixtures/soccerway/`. They do not use the network:
 
@@ -206,6 +258,7 @@ If Soccerway changes its pages, get new fixtures from the live site. Then, run t
 |-------|--------------|
 | `ruff check --fix` | Finds code errors. Corrects the errors that it can. |
 | `ruff format` | Formats the Python code. |
+| `sqlfluff fix` | Formats the SQL files: upper-case keywords, lower-case types and names, aligned column types, a maximum of 88 characters on a line. It stops the commit for a problem that it cannot correct. |
 | `check-yaml`, `check-toml` | Finds syntax errors in YAML and TOML files, for example `config/leagues.yaml`. |
 | `end-of-file-fixer`, `trailing-whitespace` | Removes spaces at line ends. Adds a newline at the end of each file. |
 | `check-merge-conflict` | Finds merge-conflict markers, for example `<<<<<<<`. |
@@ -223,10 +276,14 @@ uv run pre-commit run --all-files
 
 | Job | Steps | Time |
 |-----|-------|------|
-| `lint` | `ruff format --check`, `ruff check`, `basedpyright` | Approximately 15 seconds |
-| `test` | Install Chromium, then `pytest` | Approximately 1 minute |
+| `lint` | `ruff format --check`, `ruff check`, `basedpyright`, `sqlfluff lint` | Approximately 15 seconds |
+| `test` | Install Chromium, apply the migrations, then `pytest` | Approximately 1 minute |
 
 The two jobs run at the same time. The `lint` job does not install a browser, thus it gives a result quickly.
+
+The `test` job has a PostgreSQL 18 *service container* with the name `postgres`. GitHub starts it before the steps and waits until its health check passes. The job runs in a container, thus it connects to `postgres:5432` on the job network. The step `Apply migrations` runs the real migration command on an empty database. Then the database tests run.
+
+To check the workflow file before you push it, use [actionlint](https://github.com/rhysd/actionlint). It finds unknown keys and wrong step structure. It does not find a wrong value, for example a wrong port.
 
 The type checker (`basedpyright`) runs only in CI, not in the pre-commit hook. It checks the full project, not only the changed files, and it takes approximately 9 seconds on a laptop. A slow hook makes people skip it. Your editor shows the same type errors while you write the code (see the version rules below).
 
@@ -243,6 +300,8 @@ The `test` job runs in the `mcr.microsoft.com/playwright/python` Docker image. T
 - The pre-commit hook, CI and your terminal use the same Ruff version: the version in `uv.lock`. The hook runs `uv run ruff`. It does not install a different Ruff.
 - The tag of the Docker image must agree with the Playwright version in `uv.lock`, for example `v1.65.1-noble` for Playwright 1.65.1. When you upgrade Playwright, change the tag in `.github/workflows/ci.yml` in the same pull request.
 - CI and your terminal use the basedpyright version in `uv.lock`. The `[tool.pyright]` section of `pyproject.toml` sets `typeCheckingMode = "standard"`. An editor that uses basedpyright, Pyright or Pylance reads this section. The project setting replaces the setting of the editor. Thus, the editor shows the same errors as CI.
+- The PostgreSQL image in `docker-compose.yaml` and the service image in `.github/workflows/ci.yml` must have the same major version (now `postgres:18`). If not, a test can pass in CI and fail on your computer.
+- The sqlfluff settings are in the `[tool.sqlfluff...]` sections of `pyproject.toml`. The hook, CI and your terminal use the sqlfluff version in `uv.lock`.
 
 ### Standalone Tools
 
@@ -485,7 +544,95 @@ The project made these decisions in November 2026. At that time, the pipeline st
   - Parity tests use fixtures. A fixture does not have all the special cases of the live site. Thus, part 3b also has a live check.
   - The parity tests are temporary. The project must remember to remove them after the switch.
 
+### 14. The pipeline database is a separate PostgreSQL 18 container
+
+- **What:** A `pipeline-db` container (`postgres:18`) in the root `docker-compose.yaml`. The Airflow Compose file includes this file. The port is `127.0.0.1:5433`.
+- **The debate:**
+  1. **Use the Airflow metadata database** (`postgres` in `airflow/docker-compose.yaml`). There is no new container. But Airflow owns this database. An Airflow upgrade or reset can change it, and the pipeline data then depends on Airflow.
+  2. **Define the database in the Airflow Compose file.** Then a person must start Airflow to use the database, also for tests and manual work.
+  3. **A root Compose file that Airflow includes (the decision).** The database has one definition. You can start it alone, and Airflow starts it with the other services.
+- **Why these settings:**
+  - **Port `127.0.0.1:5433`:** `127.0.0.1` keeps the database off the network. The password is a development value, thus other computers must not connect. `5433` prevents a conflict with a PostgreSQL that uses `5432` on the same computer.
+  - **The volume is mounted at `/var/lib/postgresql`**, not at `/var/lib/postgresql/data`. From version 18, the image keeps the data in `/var/lib/postgresql/18/docker`. With the old mount path, the data is not in the volume, and it is lost when the container is removed. The project checked the `data_directory` setting, and it stopped and started the container to prove that the data stays.
+  - **The volume has a fixed name** (`african-football-pipeline-db`). Compose adds the project name to a volume name, and the project name is the name of the folder. Without a fixed name, the root folder and `airflow/` use two different volumes, without an error.
+- **Trade-offs:**
+  - Only one `pipeline-db` can run at a time. The root project and the Airflow project make different containers, and both use port `5433`.
+  - `include:` needs Docker Compose 2.20 or later.
+  - Docker is now necessary for the database tests. Without `DATABASE_URL`, pytest skips them.
+
+### 15. Plain SQL migrations with a small runner, not Alembic
+
+- **What:** The schema is in numbered SQL files (`001_initial.sql`). `db/migrate.py` applies them and records them in `schema_migrations`.
+- **The debate:**
+  1. **Alembic.** This is the standard tool for SQLAlchemy projects. It can make migrations from Python models, and it can undo a migration. But the project does not use SQLAlchemy models. Alembic would add a dependency and a second way to describe the schema.
+  2. **Plain SQL with a runner (the decision).** The schema is in SQL, which PostgreSQL reads directly. A reviewer sees the exact SQL that runs. The runner is one file of approximately 240 lines, most of them docstrings and comments. The project author wrote it to practise SQL and transactions.
+- **How the runner works:**
+  - A file name must have the form `NNN_name.sql`. Two files with the same version are an error.
+  - Before it applies a new file, the runner makes sure that each applied file exists and did not change (sha256).
+  - The runner applies a file and writes its record in one transaction. If the SQL fails, neither stays, and the runner stops.
+  - The connection uses `autocommit=True`. Without it, psycopg puts all the work in one outer transaction. Then each `conn.transaction()` is only a savepoint, and an error in file 002 also removes file 001.
+- **Tests:** 19 tests in `tests/integration/test_migrate.py`. The test author wrote them before the runner, as its specification. A test found a bug in `001_initial.sql` (a comment that used an old constraint name).
+  For the deliberate break (decision 13), the project removed the transaction. The obvious test (a file that fails after `CREATE TABLE`) still passed: PostgreSQL runs a string with many statements as one implicit transaction. Thus, the test `test_file_and_its_record_are_one_transaction` makes the record fail after a correct file. Only this test fails without the transaction.
+- **Trade-offs:**
+  - There is no command to undo a migration. To undo a change, add a new migration.
+  - The runner does not lock the database. Two runners at the same time can try to apply the same file. The second runner then fails (the tables exist, or the version is already in `schema_migrations`), and its transaction changes nothing. For one local computer, this is sufficient.
+
+### 16. The database repeats the simple rules of SourceMatch
+
+- **What:** `001_initial.sql` has six tables: `leagues`, `seasons`, `collection_runs`, `raw_documents`, `source_matches` and `season_coverage`. The constraints repeat the simple rules of `SourceMatch`: goals are not negative, the two values of a score are both present or both missing, the home team and the away team are different, and the status is one of the known values.
+- **Why:** Pydantic checks only the data that goes through the Python code. The database checks the data from all writers: a manual fix in `psql`, a future RSSSF loader, or a bug. This is *defence in depth*. The project tested each constraint with an insert of bad data.
+- **Schema rules:**
+  - Primary keys are `bigint GENERATED ALWAYS AS IDENTITY`. A program cannot write its own ID by mistake. `bigint` costs 4 bytes more than `int`, but a later change of a key type changes all the foreign keys.
+  - Times are `timestamptz`, which records an exact moment. `timestamp` has no timezone.
+  - The allowed values are `CHECK (... IN (...))`, not an `ENUM` type. A `CHECK` is easier to change in a later migration.
+  - A run is `running` only when `finished_at` is empty: `CHECK ((status = 'running') = (finished_at IS NULL))`. The two sides of `=` are true or false, thus the rule applies in the two directions.
+  - `source_matches.page_position` records the sequence of the match on the results page. A table has no row sequence, but the legacy export must keep the page sequence. The column is not unique: during a new scrape, two matches can change positions in one transaction.
+- **Not repeated:** the football rules, for example "a shootout needs a draw". In SQL, these rules are long and difficult to read. They stay in `SourceMatch` only.
+- **Trade-offs:** some rules are in two locations. A change of a rule must change both.
+
+### 17. sqlfluff formats the SQL files
+
+- **What:** A pre-commit hook runs `sqlfluff fix`, and the `lint` job runs `sqlfluff lint`. The settings are in `pyproject.toml`.
+- **The debate:**
+  1. **Only the capitalisation rules.** Keywords in upper case, types and names in lower case, as in the PostgreSQL documentation. But long `CHECK` lines stay long.
+  2. **All the rules (the decision).** sqlfluff also splits lines longer than 88 characters (the Ruff value) and corrects the spaces. Its default spacing removes the aligned column types. The setting `spacing_before = "align"` for `data_type` keeps them aligned.
+- **Settings that are not default:**
+  - `max_line_length = 88`. A wrong key (`max_length`) gave no error, and sqlfluff used its default of 80. The project found this when the hook stopped a commit.
+  - `exclude_rules = "RF04"`. This rule rejects column names that are SQL keywords, for example `name`, `source` and `timezone`. In PostgreSQL these are non-reserved keywords, and they are correct column names. They are also the field names of `SourceMatch`.
+- **Trade-offs:** sqlfluff cannot split a long `COMMENT ON` line. A person must do this. sqlfluff checks the style, not the meaning: a constraint name in a comment that does not exist passed the check. The migration tests found that error.
+
 ## Changelog
+
+### November 2026: The pipeline database and the migration runner (roadmap step 3, part 1)
+
+**What happened:** The project added the pipeline database, its first schema and a migration runner. CI now runs the database tests against PostgreSQL 18. The pipeline does not write to the database yet, thus the output did not change.
+
+**Why it was necessary:** Roadmap step 3 makes PostgreSQL the single source of truth (decision 5). The loader (part 2) and the exports from the database (part 3) need the tables, a way to change them, and tests against a real database.
+
+**How the project did it:**
+
+- `docker-compose.yaml`: the `pipeline-db` container (decision 14). `.env.example` gives `DATABASE_URL`.
+- `db/migrations/001_initial.sql`: six tables with constraints (decision 16).
+- `db/migrate.py`: the migration runner (decision 15). Run it with `uv run --env-file .env python -m african_football.db.migrate`.
+- `tests/conftest.py`: the fixture `empty_database` makes a new database for each test and deletes it after the test. The `db` marker shows the tests that need PostgreSQL.
+- CI: a PostgreSQL 18 service in the `test` job, and a step that applies the migrations. `sqlfluff lint` in the `lint` job (decision 17).
+- `airflow/docker-compose.yaml` includes the root Compose file, and gives `DATABASE_URL` to the Airflow tasks.
+- New dependencies: `psycopg[binary]` (the PostgreSQL driver) and `sqlfluff` (dev).
+
+**Verification:**
+
+1. The container is healthy, and the port is open only on `127.0.0.1`. The data stays after `docker compose down` and `up`.
+2. 15 inserts of bad data: each one stopped at the correct constraint. The correct inserts passed.
+3. The runner applies `001` on an empty database. A second run applies nothing. The checksum in `schema_migrations` is the same as the `sha256sum` of the file.
+4. 19 runner tests pass. With the transaction removed, `test_file_and_its_record_are_one_transaction` fails (decision 15).
+5. With `CI=true` and no `DATABASE_URL`, the 11 database tests fail. They do not skip.
+6. `docker compose -f airflow/docker-compose.yaml config` shows `pipeline-db` and the volume `african-football-pipeline-db`.
+
+**Trade-offs:**
+
+- Docker is necessary for the database tests and for the pipeline database.
+- The `test` job in CI starts a PostgreSQL container. This adds some seconds to each run.
+- The migration files are now history. A change to an applied file stops the runner. A schema change needs a new file.
 
 ### November 2026: Soccerway adapter and the switch (roadmap step 2, part 3b)
 
@@ -661,7 +808,7 @@ At the end of each step, the pipeline works.
 |---|---|---|
 | 1 | Repair the Soccerway scraper with stable selectors and saved-page fixtures | ✅ Done |
 | 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | ✅ Done |
-| 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | Planned |
+| 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | In progress: part 1 of 3 done (database, schema, migrations) |
 | 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | Planned |
 | 5 | Add reconciliation between sources, validation rules, and season statuses | Planned |
 | 6 | Add the Source Manager with fallback and resume. The Airflow DAG calls the library. | Planned |
@@ -678,9 +825,12 @@ At the end of each step, the pipeline works.
 | Pydantic | Checks the match records from the source parsers |
 | BeautifulSoup | Reads the stored HTML pages |
 | Apache Airflow | Orchestration (local Docker) |
-| PostgreSQL | Central database (planned, roadmap step 3) |
+| PostgreSQL 18 | Central database (roadmap step 3), in Docker |
+| psycopg 3 | PostgreSQL driver for Python |
+| Docker Compose | Runs the pipeline database and the local Airflow stack |
 | pytest | Testing framework |
 | Ruff | Linting and formatting |
+| sqlfluff | Linting and formatting of the SQL files |
 | pre-commit | Runs the checks before each commit |
 | GitHub Actions | CI: runs the checks and the tests on each pull request |
 | basedpyright | Static type checking (CI and editors) |
