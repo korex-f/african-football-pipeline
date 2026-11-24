@@ -10,7 +10,9 @@ static HTML, thus the adapter uses plain HTTP, not a browser.
                          SeasonRecord for each season page.
     2. fetch:            get the season page into the raw store. A page that
                          the store has is not fetched again.
-    3. parse:            roadmap step 4, part 2.
+    3. parse:            read the matches of the top league from the stored
+                         page (parser.py). The lines that the parser could
+                         not read are in `problems`, and in the log.
 
 The season labels come from season_label(), thus a season has the same label
 as from Soccerway (decision 20). The text of the link gives the years, not
@@ -40,6 +42,7 @@ from african_football.sources.rsssf.index import (
     parse_index,
     select_section,
 )
+from african_football.sources.rsssf.parser import parse_page
 from african_football.utils.logger import PipelineLogger
 
 if TYPE_CHECKING:
@@ -77,6 +80,9 @@ class RsssfAdapter:
         self.logger = logger
         self.http = http or RsssfHttp()
         self.today = today or date.today()
+        # The problems of the last parse(), for example the lines that look
+        # like a result but that the parser could not read.
+        self.problems: list[str] = []
 
     async def discover_seasons(self, league: LeagueConfig) -> list[SeasonRecord]:
         """Give the seasons of the league that RSSSF has, oldest first.
@@ -140,8 +146,31 @@ class RsssfAdapter:
         documents: list[RawDocument],
         store: "RawStore",
     ) -> list[SourceMatch]:
-        """Roadmap step 4, part 2."""
-        raise NotImplementedError("The RSSSF parser comes in roadmap step 4.2")
+        """Read the matches of the top league from the season page.
+
+        The page is the first document. For a page with many seasons, the
+        anchor of season.url selects the part of the season.
+        """
+        if not documents:
+            raise RsssfConfigError(f"Season {season.season}: no stored page")
+        if not season.url:
+            raise RsssfConfigError(f"Season {season.season} has no RSSSF page")
+        document = documents[0]
+        _page_url, anchor = urldefrag(season.url)
+        matches, self.problems = parse_page(
+            store.load(document),
+            league_code=league.code,
+            season=season.season,
+            start_year=season.start_year,
+            end_year=season.end_year,
+            timezone=league.timezone,
+            source_url=season.url,
+            raw_documents=(document.sha256,),
+            anchor=anchor,
+        )
+        for problem in self.problems:
+            self.logger.log(f"RSSSF {season.season}: {problem}", level="WARNING")
+        return matches
 
     def _season_record(
         self, entry: IndexEntry, index_url: str
