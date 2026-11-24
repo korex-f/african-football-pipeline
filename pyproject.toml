@@ -25,6 +25,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "db: the test needs Postgres. It is skipped when DATABASE_URL is not set.",
+]
 
 [build-system]
 requires = ["hatchling"]
