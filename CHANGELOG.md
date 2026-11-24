@@ -2,6 +2,34 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: RSSSF parser (roadmap step 4, part 2)
+
+**What happened:** `RsssfAdapter.parse` now reads the matches of the top league from an RSSSF season page. The pipeline does not use RSSSF yet (part 4).
+
+**Why it was necessary:** RSSSF has results for seasons that Soccerway does not have. The pages are hand-written by many authors, in many forms.
+
+**How the project did it:**
+
+- The adapter of part 1 got all 187 season pages of the NPFL, Ghana and Egypt into `data/sources/rsssf/`: 190 requests in 10.6 minutes, 0 failures.
+- `sources/rsssf/parser.py`: finds the competitions of the page (two structures), takes the first with results, and reads its lines with rules for rounds, dates, stages, results and notes ([decision 22](docs/decisions/0022-rsssf-parser.md)).
+- A report for each of the 187 seasons showed each new form of the pages. Examples: a note that continues in a column at the right of the next results, tables in the middle of a league, dates of two days, a page for 11 seasons with anchors.
+- Lines that look like a result but were not read are problems: in `RsssfAdapter.problems` and in the log. They are not ignored, and they do not stop the season.
+- The techniques are in [src/african_football/sources/rsssf/README.md](src/african_football/sources/rsssf/README.md), sections 10 to 15.
+
+**Verification:**
+
+1. **All 187 pages:** 21,334 matches. 0 dates outside the years of their season. 20 problems, each a real limit (an unknown opponent, or a results grid that the parser does not read).
+2. **Two sources, one season.** Ghana 2023/24: all 306 Soccerway matches are in the RSSSF output with the same date and score; RSSSF also has an abandoned match before its replay. Ghana 2017: 238 of 240 agree; the 2 others differ between the sources.
+3. 47 new tests. The page tests use 14 unchanged RSSSF season pages, one for each form; their README names the authors.
+4. 10 deliberate breaks, each caught. Three were caught only after new tests: other rules hid them (layered defences, module README section 12).
+5. 341 tests pass. basedpyright gives 0 errors.
+
+**Trade-offs:**
+
+- Results grids and crosstables are not read.
+- Team names are raw; one page can write one club in four ways.
+- The first competition with results is the league. A page with the cup first would give the cup.
+
 ## November 2026: RSSSF adapter, discovery and fetch (roadmap step 4, part 1)
 
 **What happened:** The project added the second source adapter, for RSSSF. It finds the seasons of a league in the RSSSF list of champions, and gets the season pages into the raw store. The parser comes in part 2. The pipeline does not use RSSSF yet.
