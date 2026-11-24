@@ -3,6 +3,9 @@
 # Required fields: code, name, country, slug, fetch_halftime, timezone
 # timezone: IANA name, for example Africa/Lagos. Dates and kick-off times use it.
 # Optional flags default to false if omitted.
+# rsssf_index: the RSSSF list of champions (relative to https://www.rsssf.org/).
+# rsssf_section: the heading of this league's list on that page, if the page
+#   has lists of different competitions. Omit both if RSSSF has no data.
 
 leagues:
   - code: npfl
@@ -12,6 +15,8 @@ leagues:
     fetch_halftime: true
     timezone: Africa/Lagos
     submission_code: ng1
+    rsssf_index: tablesn/nigchamp.html
+    rsssf_section: National League/Nigeria Football League
 
   - code: nnl
     name: Nigeria National League
@@ -28,6 +33,7 @@ leagues:
     fetch_halftime: true
     timezone: Africa/Accra
     submission_code: gh1
+    rsssf_index: tablesg/ghachamp.html
 
   - code: eg_pl
     name: Egypt Premier League
@@ -36,3 +42,5 @@ leagues:
     fetch_halftime: true
     timezone: Africa/Cairo
     submission_code: eg1
+    rsssf_index: tablese/egychamp.html
+    rsssf_section: National League
