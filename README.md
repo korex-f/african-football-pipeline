@@ -40,9 +40,14 @@ src/african_football/
 ├── sources/
 │   ├── base.py                   ← SourceAdapter Protocol + RawDocument
 │   ├── raw_store.py              ← RawStore: stored pages + manifest.json
-│   └── soccerway/
-│       ├── adapter.py            ← SoccerwayAdapter: fetch with Playwright, parse
-│       └── parser.py             ← Reads stored HTML with BeautifulSoup
+│   ├── soccerway/
+│   │   ├── adapter.py            ← SoccerwayAdapter: fetch with Playwright, parse
+│   │   └── parser.py             ← Reads stored HTML with BeautifulSoup
+│   └── rsssf/
+│       ├── README.md             ← The techniques of the module
+│       ├── adapter.py            ← RsssfAdapter: discover seasons, fetch pages (plain HTTP)
+│       ├── index.py              ← Reads an RSSSF list of champions
+│       └── http.py               ← One request at a time, with an interval and retries
 ├── exports/
 │   └── legacy.py                 ← SourceMatch → the current JSON match format
 ├── db/
@@ -70,7 +75,8 @@ docker-compose.yaml               ← The pipeline database (pipeline-db, Postgr
 tests/
 ├── unit/                         ← Pure-function tests (no browser, no network)
 ├── integration/                  ← Component wiring + saved-page regression tests
-└── fixtures/soccerway/           ← Trimmed copies of real Soccerway pages
+├── fixtures/soccerway/           ← Trimmed copies of real Soccerway pages
+└── fixtures/rsssf/               ← Unchanged RSSSF pages (authors in its README)
 
 data/
 ├── sources/{source}/{league}/{season}/ ← Raw pages (.html.gz) + manifest.json
@@ -303,7 +309,7 @@ At the end of each step, the pipeline works.
 | 1 | Repair the Soccerway scraper with stable selectors and saved-page fixtures | ✅ Done |
 | 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | ✅ Done |
 | 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | ✅ Done |
-| 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | Planned |
+| 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | In progress: part 1 of 4 done (discovery and fetch) |
 | 5 | Add reconciliation between sources, validation rules, and season statuses | Planned |
 | 6 | Add the Source Manager with fallback and resume. The Airflow DAG calls the library. | Planned |
 | 7 | Add more leagues from RSSSF, and federation and league sites | Later |
@@ -332,3 +338,5 @@ At the end of each step, the pipeline works.
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
+
+The RSSSF data comes from the Rec.Sport.Soccer Statistics Foundation (https://www.rsssf.org/). Each RSSSF page names its authors. Their licence permits copies when the authors are acknowledged.

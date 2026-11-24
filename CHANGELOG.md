@@ -2,6 +2,44 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: RSSSF adapter, discovery and fetch (roadmap step 4, part 1)
+
+**What happened:** The project added the second source adapter, for RSSSF. It finds the seasons of a league in the RSSSF list of champions, and gets the season pages into the raw store. The parser comes in part 2. The pipeline does not use RSSSF yet.
+
+**Why it was necessary:** RSSSF has results for old seasons that Soccerway does not have, and final tables that can verify a season (decision 7).
+
+**How the project did it:**
+
+- A survey of 15 RSSSF pages of 6 countries, from 1990 to 2024, before the design ([decision 21](docs/decisions/0021-rsssf-adapter-discovery-and-fetch.md)).
+- `sources/rsssf/index.py`: reads a list of champions. The season comes from the text of the link, not from the file name. Each entry has the heading of its list.
+- `sources/rsssf/http.py`: one request at a time, 3 seconds between requests, retries after 5, 15 and 45 seconds, no retry for a 404. Pages without a declared character set are decoded as UTF-8, Windows-1252 or Latin-1.
+- `sources/rsssf/adapter.py`: `RsssfAdapter` with `discover_seasons` and `fetch`. The labels come from `season_label()` (decision 20).
+- `leagues.yaml`: `rsssf_index` and `rsssf_section` for the NPFL, Ghana and Egypt.
+- The techniques are in [src/african_football/sources/rsssf/README.md](src/african_football/sources/rsssf/README.md).
+
+**Verification:**
+
+1. 37 new tests, without the network. The fixtures are the real lists of champions of Nigeria, Ghana and Egypt, without changes. Their README names the authors, as the licence of the pages requires.
+2. Deliberate breaks. Each break made the correct tests fail:
+
+   | Break | Tests that failed |
+   |---|---|
+   | The section is ignored | 7, for example the Egypt 1948/49 champion |
+   | A 404 is retried | `test_404_is_not_retried` |
+   | No interval between requests | `test_interval_between_two_requests` |
+   | The anchor stays in the page URL | `test_fetch_stores_the_page_without_the_anchor` |
+   | `abandoned` is a champion | `test_abandoned_season_has_no_winner`, `test_not_finished_season_has_no_winner` |
+   | `1999/00` read as 1999 to 1900 | `test_season_years[1999/00]` |
+   | `fetch` without its `store` parameter | basedpyright: `"RsssfAdapter" is not assignable to declared type "SourceAdapter"` |
+
+3. A live check: discovery for the three leagues and one page for each, 6 requests in 18 seconds. NPFL 51 seasons (1972 to 2025/26), Ghana 67 (1956 to 2025/26), Egypt 69 (1948/49 to 2025/26). Each has 2 seasons without a winner. For each league, the label `2023/2024` gave the correct page.
+
+**Trade-offs:**
+
+- A season without a winner is not scraped. Some of these pages have results.
+- The Nigeria National League has no list of champions on RSSSF.
+- The pages are hand-written. A new format can break the parser of part 2.
+
 ## November 2026: Correct labels for calendar-year seasons (version 1.2.0)
 
 **What happened:** The Soccerway discoverer gave a calendar-year season a label with two years. For example, the NPFL 2019 season (January to July 2019) had the label `2018/2019`. Now it has the label `2019`, and its files are `2019.json` and `2019_ng1.txt`. `PIPELINE_VERSION` is now `1.2.0`.
