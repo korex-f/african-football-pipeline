@@ -27,3 +27,4 @@ Each file is one decision. A decision file is not deleted. If the project change
 | 19 | [The exports read from the database, and the coverage uses n × (n − 1)](0019-exports-read-from-the-database.md) |
 | 20 | [One season label style for all sources](0020-one-season-label-style-for-all-sources.md) |
 | 21 | [The RSSSF adapter: discovery from the list of champions, and polite plain HTTP](0021-rsssf-adapter-discovery-and-fetch.md) |
+| 22 | [The RSSSF parser: the first competition with results, line rules, and visible problems](0022-rsssf-parser.md) |

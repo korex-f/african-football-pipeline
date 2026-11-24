@@ -200,8 +200,51 @@ def test_fetch_without_url(logger, tmp_path):
         asyncio.run(adapter.fetch(_league(), _season(""), store))
 
 
-def test_parse_comes_in_part_2(logger, tmp_path):
+def _stored_page(tmp_path, name: str, label: str):
+    """Put a fixture season page in a raw store, and give the store and the document."""
+    store = RawStore(tmp_path, "rsssf", "gh_pl", label)
+    url = f"https://www.rsssf.org/tablesg/{name}"
+    page = decode_page((FIXTURES / "seasons" / name).read_bytes())
+    return store, store.save(url, name, page, "Africa/Accra"), url
+
+
+def test_parse_gives_the_matches_of_the_stored_page(logger, tmp_path):
+    store, document, url = _stored_page(tmp_path, "gha2024.html", "2023/2024")
+    season = SeasonRecord("2023/2024", 2023, 2024, SeasonStatus.COMPLETED, url=url)
+    adapter, http = _adapter(logger, {})
+    league = _league(code="gh_pl", timezone="Africa/Accra")
+
+    matches = adapter.parse(league, season, [document], store)
+
+    assert len(matches) == 307
+    assert http.urls == []  # parse does not use the network
+    first = matches[0]
+    assert (first.source, first.league_code, first.season, first.timezone) == (
+        "rsssf",
+        "gh_pl",
+        "2023/2024",
+        "Africa/Accra",
+    )
+    assert first.raw_documents == (document.sha256,)
+    assert first.source_url == url
+    assert adapter.problems == []
+
+
+def test_parse_uses_the_anchor_and_logs_the_problems(logger, tmp_path):
+    store, document, url = _stored_page(tmp_path, "ghahist.html", "1963/1964")
+    season = SeasonRecord(
+        "1963/1964", 1963, 1964, SeasonStatus.COMPLETED, url=url + "#99"
+    )
+    adapter, _ = _adapter(logger, {})
+
+    assert adapter.parse(_league(), season, [document], store) == []
+    assert adapter.problems == ["no season part for the anchor #99"]
+    log = next((tmp_path / "logs").glob("*")).read_text()
+    assert "no season part for the anchor #99" in log
+
+
+def test_parse_without_a_document(logger, tmp_path):
     adapter, _ = _adapter(logger, {})
     store = RawStore(tmp_path, "rsssf", "npfl", "1972")
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RsssfConfigError, match="no stored page"):
         adapter.parse(_league(), _season("x"), [], store)

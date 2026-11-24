@@ -6,7 +6,8 @@ This folder has the adapter for RSSSF, the Rec.Sport.Soccer Statistics Foundatio
 |---|---|
 | `index.py` | Reads a list of champions, and gives one `IndexEntry` for each season line |
 | `http.py` | Gets pages: one at a time, with an interval, with retries |
-| `adapter.py` | `RsssfAdapter`: `discover_seasons`, `fetch`, and later `parse` |
+| `parser.py` | Reads the matches of the top league from a season page ([decision 22](../../../../docs/decisions/0022-rsssf-parser.md)) |
+| `adapter.py` | `RsssfAdapter`: `discover_seasons`, `fetch` and `parse` |
 
 The RSSSF pages are the work of their authors. Their licence permits copies when the authors are acknowledged. The fixtures in `tests/fixtures/rsssf/` name the authors in their README.
 
@@ -117,3 +118,74 @@ adapter: SourceAdapter = RsssfAdapter(logger)
 ```
 
 At this line, the type checker compares `RsssfAdapter` with the `SourceAdapter` Protocol ([decision 11](../../../../docs/decisions/0011-adapter-interface-is-a-protocol.md)). For a deliberate break, the project removed the `store` parameter of `fetch`. basedpyright gave the error `"RsssfAdapter" is not assignable to declared type "SourceAdapter"`.
+
+## 10. A line parser with state
+
+**What:** `parse_lines()` reads the lines of a competition from top to bottom. It keeps a *state*: the stage, the round, the date, and whether a note is open. Each line changes the state or gives a result.
+
+```text
+Round 19                                   -> round = 'Round 19', date = None
+[Mar 20]                                   -> date = 2024-03-20
+Medeama      abd Aduana   [abandoned ...   -> a row with round 19 and 2024-03-20
+[Mar 21]                                   -> date = 2024-03-21
+Medeama      2-0 Aduana                    -> a row (the replay)
+```
+
+**Why:** A result line does not have its round or its date. They come from the lines before it. A function that reads one line alone cannot know them.
+
+**How:** The order of the checks is important. A line that starts with a space is a list of scorers or a note, never a result. A table row (` 1.Enyimba ...`) is not a result. Then the date, the round, the stage and the result rules are tried, in this sequence.
+
+## 11. A note in a column
+
+Some notes continue at the right of the next result lines:
+
+```text
+Gombe United            1-1 Rivers United           [Gombe United 3 points and 3 goals
+Enyimba                 2-0 Sporting Lagos           deducted due to fan misconduct
+Akwa United             3-1 Abia Warriors            (assault on match officials)]
+```
+
+The first parser skipped all the lines of an open note, thus it lost two matches, without a problem in the report. Now the result rule ends the away team at two spaces or a tab, and gives the remainder of the line as `rest`. When a note is open, `rest` is the next part of the note, and the left part is still a result.
+
+The regular expression for the away team: `[^\s\[](?:(?! {2}|\t).)*?[^\s\[]`. `(?! {2}|\t)` is a *negative lookahead*: each character of the name must not be the start of two spaces or a tab. Thus a name can have single spaces (`Sporting Lagos`) but stops at the column gap.
+
+## 12. Layered defences, and how to test each layer
+
+Three rules stop a table row from being a result line:
+
+1. `_TABLE_ROW` (`^\s*\d+\.`): a row starts with its position.
+2. `_LETTER`: a team name has a letter. In `10.Kotoko  2 0 0 2  1-3  0`, the "away team" is `0`.
+3. The order of the checks in `split_one_block()`: a single row cannot start "a table after results".
+
+For a deliberate break, the project removed rule 1. The fixture tests did not fail: rules 2 and 3 also stopped the bug. A test for rule 1 must give a line that only rule 1 can stop: two relegated rows with single spaces (`10.Kotoko 2 0 0 2 1-3 0 Relegated`), thus the "away team" `0 Relegated` has a letter.
+
+This is a general lesson: when a test does not fail after a deliberate break, either the rule is not necessary, or a different rule hides it. Find out which.
+
+## 13. The year of a date without a year
+
+A season over two years (for example 2023/24) has dates from September to June. The parser keeps the month of the first date of the competition. A month on or after it is in the first year; an earlier month is in the second year:
+
+| Date | First month: September | Year |
+|---|---|---|
+| `[Sep 15]` | 9 ≥ 9 | 2023 |
+| `[Dec 30]` | 12 ≥ 9 | 2023 |
+| `[Jan 2]` | 1 < 9 | 2024 |
+
+A calendar-year season (`2015`) has one year for all dates. A date with its year (`[Jan 2, 2025]`) keeps its year. The check: all 306 Ghana 2023/24 dates agree with Soccerway, and the 21,334 matches of the 187 pages have no date outside the years of their season.
+
+## 14. Problems that are visible
+
+The parser does not stop at a line that it cannot read, and it does not ignore the line. `parse_page()` gives the matches and a list of problems:
+
+- `not read: Sportnet  4-0  [?]`: a line that looks like a result (a word, a result, a word) but does not have the known form.
+- `not valid: Masry 1-0 ZED: ...`: a row that is not a valid `SourceMatch`.
+- `16 lines of a results grid or crosstable not read`: one problem for each page, not one for each line.
+- `no season part for the anchor #99`.
+
+A page with only a results grid gives a problem. Thus it does not look the same as a page without results. The adapter puts the problems in `RsssfAdapter.problems` and in the log.
+
+## 15. Measure on all the data, not on samples
+
+The first version of the parser was correct for the 15 sample pages of the survey. On all 187 pages, a report for each season showed the problems: a league with 80 of 242 matches, 8 seasons with the same 5 matches, a page where the table was the league. The report compared the number of matches with n × (n − 1) for n teams, the dates with the years of the season, and the number of problems.
+
+The fixtures in `tests/fixtures/rsssf/seasons/` are the pages that showed each form. Each fixture test has a number from this report, checked against the page.
