@@ -42,9 +42,10 @@ from african_football.sources.rsssf.parser import (
     _TABLE_ROW,
     _clean,
     _clean_line,
+    _has_results,
+    choose_league,
     season_part,
     split_competitions,
-    top_league,
 )
 
 # The heading of a final table: 'Final Table:', 'Final Tables:',
@@ -113,6 +114,7 @@ def parse_tables(
     league_code: str,
     season: str,
     anchor: str = "",
+    league_pattern: str = "",
 ) -> tuple[list[SourceTableRow], list[str]]:
     """Give the rows of the final tables of the top league, and the problems.
 
@@ -128,13 +130,24 @@ def parse_tables(
         page = part
     # A page with only tables (no results) has no top league in
     # parser.top_league(). Its first competition is the league.
-    competition = top_league(page)
-    has_results = competition is not None
-    if competition is None:
-        competitions = split_competitions(page)
-        if not competitions:
-            return [], []
+    # The same choice as parser.parse_page() (decision 24). A page with only
+    # tables has no competition with results: choose_league() then gives the
+    # first league with a final table, else the first competition.
+    competitions = split_competitions(page)
+    if not competitions:
+        return [], []
+    choice = choose_league(competitions, league_pattern)
+    if choice.competition is not None:
+        competition = choice.competition
+    elif choice.alternatives:
+        # The page has competitions with data, and the rules decided that
+        # none of them is the league (for example regional leagues only).
+        return [], []
+    else:
+        # No competition with results or a final-table heading: a season
+        # part with only a table (the history pages).
         competition = competitions[0]
+    has_results = _has_results(competition)
     lines = competition.text.splitlines()
 
     tables: dict[str, list[SourceTableRow]] = {}
