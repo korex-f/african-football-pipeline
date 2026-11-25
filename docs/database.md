@@ -35,6 +35,7 @@ Do not change a file after the runner applied it. The runner records the sha256 
 - `collection_runs`: one row for each run, with the status `running`, `succeeded` or `failed`.
 - `raw_documents`: one row for each stored page (the HTML stays in `data/sources/`).
 - `source_matches`: one row for each match. A new run updates the row.
+- `source_tables`: the final table of each season and source ([decision 23](decisions/0023-final-tables-and-the-table-check.md)). A run with table rows replaces the table; a run without table rows does not change it.
 - `season_coverage`: one row for each season: the expected matches (n × (n − 1) for n teams), the found matches, and a status.
 
 The exports (JSON and TXT) use the matches of the latest succeeded run, in the sequence of the results page ([decision 19](decisions/0019-exports-read-from-the-database.md)). Thus the pipeline needs the database. Run the CLI with the settings file:
@@ -80,4 +81,13 @@ For the SQL techniques of the loader (the upsert, `xmax = 0`, `IS DISTINCT FROM`
 SELECT s.league_code, s.label, c.expected_matches, c.found_matches, c.status, c.updated_at
 FROM season_coverage c JOIN seasons s USING (season_id)
 ORDER BY s.league_code, s.label;
+```
+
+```sql
+-- The final table of a season from RSSSF
+SELECT t.stage, t.position, t.team_raw, t.played, t.won, t.drawn, t.lost,
+       t.goals_for, t.goals_against, t.points, t.note
+FROM source_tables t JOIN seasons s USING (season_id)
+WHERE s.league_code = 'gh_pl' AND s.label = '2023/2024' AND t.source = 'rsssf'
+ORDER BY t.source_table_pk;
 ```

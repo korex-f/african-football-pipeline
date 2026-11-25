@@ -8,6 +8,7 @@ This folder has the code that writes to the pipeline database (PostgreSQL 18). F
 | `migrate.py` | Applies the new migration files, and records them in `schema_migrations` ([decision 15](../../../docs/decisions/0015-plain-sql-migrations-not-alembic.md)) |
 | `loader.py` | Writes one collection run: the league, the season, the run, the stored pages and the matches ([decision 18](../../../docs/decisions/0018-loader-records-each-run.md)) |
 | `reader.py` | Reads the matches of the latest succeeded run of a season for the exports ([decision 19](../../../docs/decisions/0019-exports-read-from-the-database.md)) |
+| `migrations/002_source_tables.sql` | The final tables of the seasons ([decision 23](../../../docs/decisions/0023-final-tables-and-the-table-check.md)) |
 
 The sections below explain the techniques in this code. Each section gives what the technique is, why the code uses it, and how. The examples use the tables of `001_initial.sql`.
 
@@ -234,7 +235,20 @@ RETURNING expected_matches, status;
 - Then `RETURNING` gives **no row**, the same as `DO NOTHING` ([section 2](#2-do-update-or-do-nothing-and-returning)). The loader then reads the coverage with a `SELECT`.
 - `fail()` uses `DO NOTHING`: a failed run writes the status `failed` only for a season that has no coverage. Thus a failed run does not remove the result of an earlier run.
 
-## 14. How the tests use the database
+## 14. Replace a unit: DELETE, then INSERT, in one transaction
+
+**What:** A run with table rows deletes the stored table of the season and the source, and writes the new rows:
+
+```sql
+DELETE FROM source_tables WHERE season_id = %s AND source = %s;
+INSERT INTO source_tables (...) VALUES (...);   -- one for each row
+```
+
+**Why:** A table is one unit. An upsert of each row (section 1) keeps a row that the new table does not have, and then the stored table is a mix of two tables. For the matches, the loader keeps such rows on purpose ([decision 18](../../../docs/decisions/0018-loader-records-each-run.md)); for a table, a mix is wrong.
+
+**How:** The `DELETE` and the `INSERT` are in the `load()` transaction. Another connection sees the old table or the new table, never no table and never half a table. The `DELETE` has `AND source = %s`: the table of a different source stays. A run without table rows does not `DELETE`: a run that did not find the table must not remove a good table.
+
+## 15. How the tests use the database
 
 - **One database for each test.** The fixture `empty_database` (`tests/conftest.py`) makes a new database with a random name, and removes it after the test (`DROP DATABASE ... WITH (FORCE)`). `pipeline_database` also applies the migrations. Thus a test cannot change the data of a different test or of `football`.
 - **A database constraint tested from Python.** `SourceMatch` does not allow a bad match. `model_copy(update={...})` makes a copy without the Pydantic checks, thus the test can give a bad match to the database, and the `CHECK` constraint must stop it.

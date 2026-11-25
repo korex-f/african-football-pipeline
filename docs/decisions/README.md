@@ -28,3 +28,4 @@ Each file is one decision. A decision file is not deleted. If the project change
 | 20 | [One season label style for all sources](0020-one-season-label-style-for-all-sources.md) |
 | 21 | [The RSSSF adapter: discovery from the list of champions, and polite plain HTTP](0021-rsssf-adapter-discovery-and-fetch.md) |
 | 22 | [The RSSSF parser: the first competition with results, line rules, and visible problems](0022-rsssf-parser.md) |
+| 23 | [Final tables are stored, and a table check compares them with the matches](0023-final-tables-and-the-table-check.md) |
