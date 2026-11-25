@@ -1,6 +1,6 @@
 # 22. The RSSSF parser: the first competition with results, line rules, and visible problems
 
-*Status: accepted (November 2026). [All decisions](README.md)*
+*Status: accepted (November 2026). The rule for the top league ("the first competition with results") is replaced by [decision 24](0024-choosing-the-national-league-on-a-page.md). [All decisions](README.md)*
 
 - **What:** `sources/rsssf/parser.py` reads the matches of the top league from an RSSSF season page. `RsssfAdapter.parse` uses it. The lines that the parser cannot read are in `RsssfAdapter.problems` and in the log.
 - **Why:** RSSSF pages are hand-written by many authors over 30 years. A parser for such pages makes mistakes. The design question is how to find the mistakes.

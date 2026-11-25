@@ -2,6 +2,35 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: The national league on RSSSF pages of all African countries
+
+**What happened:** The RSSSF parser and the table reader choose the national league of a page with new rules (`choose_league()`), not with "the first competition with results". `leagues.yaml` can correct a league (`rsssf_league`). The log shows each choice, its reason and the other competitions.
+
+**Why it was necessary:** A survey ran the RSSSF code on all African countries: 2,321 season pages of 56 countries (54 CAF members, Zanzibar and Réunion), downloaded politely into `data/survey/` (not in the repository). The code did not crash on any page. But it chose a cup as the national league in 208 seasons, a sentence in 26, a play-off in 16, and an island league in 17, without a problem in the report.
+
+**Correction of part 2:** The old rule also chose a cup in 22 seasons of Nigeria, Ghana and Egypt. Part 2 reported 21,334 matches for these leagues; 133 of them were cup matches (for example 31 matches of the Egypt Cup in 2010/11). The new number is 21,201. The tests of part 2 did not show it, because no fixture had a cup before a league without results.
+
+**How the project did it:**
+
+- `choose_league()`, `competition_kind()` and `LeagueChoice` in `sources/rsssf/parser.py` ([decision 24](docs/decisions/0024-choosing-the-national-league-on-a-page.md)): cups, lower levels, play-offs and sentences are not the league; a page of regional leagues only has no league; a national name replaces a first candidate without a league word.
+- Words in English, French and Portuguese, also for the headings of structure B.
+- `rsssf_league` in `LeagueConfig` and `leagues.yaml`. If it does not match a competition of the page, the page has no league.
+- `RsssfAdapter.league_choice`, and the choice in the log.
+- Each rule came from a comparison of all 2,448 seasons with the version before ([module README](src/african_football/sources/rsssf/README.md) section 19).
+
+**Verification:**
+
+1. **All 2,448 seasons:** a cup is chosen in 0 seasons (208 before). 427 seasons have a different choice. Table rows: 20,182 (18,480 before). Table checks that agree: 901 (899 before). No season that agreed with its table before is worse.
+2. **Nigeria, Ghana and Egypt:** each of the 22 changes is a cup that is no longer the league; 231 more league table rows.
+3. 61 new tests, with 12 survey pages as fixtures (their authors are in `tests/fixtures/rsssf/README.md`).
+4. 10 deliberate breaks, each caught. Break 7 (text in brackets counts) needed a test with a real name of 10 words (Rwanda 2005).
+
+**Trade-offs:**
+
+- The rules are words. A league with an unknown name needs `rsssf_league`.
+- A page with only lower or regional competitions gives one of them as a fallback, with its reason in the log.
+- The other findings of the survey (result forms such as `n/p` and `1–1`, table headings, the index, dates) come in their own changes.
+
 ## November 2026: Final tables and the table check (roadmap step 4, part 3)
 
 **What happened:** The RSSSF adapter now reads the final tables of the top league (`RsssfAdapter.parse_tables`). The loader writes them to the new table `source_tables` (migration 002). `table_check()` compares a table with the matches. The pipeline does not use RSSSF yet (part 4).

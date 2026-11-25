@@ -218,3 +218,33 @@ A filter that skips lines can lose data without a problem in the report. Two exa
 - The next version required two number columns. Then `1. Leventis United  22-30` (a short table of 1986) was skipped too: it is a row that must be a problem, not a row that the reader must ignore.
 
 The rule now: a table row has a number after a space, after the team name. The lesson: after a change to a filter, compare the totals before and after, not only the problems.
+
+## 19. Choosing the league: rules that a comparison made
+
+**What:** `choose_league()` chooses the national league among the competitions of a page ([decision 24](../../../../docs/decisions/0024-choosing-the-national-league-on-a-page.md)). It gives a `LeagueChoice`: the competition, the reason, and the alternatives. The adapter writes them to the log:
+
+```text
+RSSSF 2023/2024: league 'Ghana Premier League' (first league); other competitions: MTN FA Cup 2023/24; Super Cup 2024
+```
+
+**Why:** The rule of decision 22 ("the first competition with results") was tested on three countries. On 56 countries it took a cup in 208 seasons, without a problem in the report.
+
+**How the rules were made:** Not from ideas, but from a comparison. A script (outside the repository) computed, for each of 2,448 seasons, the chosen competition, the matches, the table rows and the table check. After each change to the rules, it compared each season with the version before, and listed the changes. Each new rule made other changes, and some were wrong:
+
+| Change | What the comparison showed | Correction |
+|---|---|---|
+| A national name replaces the first candidate | Nigeria: the second level replaced 'Nigeria Football League' | Only if the first candidate has no league word |
+| — | 'NPFL 2023/24' has no league word | An abbreviation that ends with L is a league word |
+| — | The page title 'Nigeria 2003' was replaced | The page title stays |
+| A sentence has 3 lower-case words | 'Championnat national de première division' was a sentence | League words do not count |
+| 'Stage' is a league word | 'Group A' (4 matches) stayed against the national league (36) | A stage stays only with more results |
+| Regional leagues only (4 or more place names) | Years on pages with many seasons were place names | A name with a year is not a place |
+| The table reader reads the first competition when no league is chosen | Cape Verde: the table of an island league | Only when the page has no competition with data |
+
+The lesson: for rules with words, a test of one page shows that a rule works. A comparison of all pages shows what else the rule changes.
+
+## 20. Regular expressions in more than one language
+
+The rules use English, French and Portuguese words: `Coupe|Copa|Ta[çc]a`, `deuxi[eè]me|2[eè]me`, `divis[aã]o`. Character classes (`[çc]`, `[eè]`) accept a word with or without its accent, because some pages write `Taca` and some `Taça`. `re.IGNORECASE` also works for these letters in Python 3.
+
+The words of all the rules together are one pattern, `_VOCABULARY`. The note rule uses it: a name in lower case ('Championnat national de première division') is not a sentence, because its lower-case words are league words. `_VOCABULARY` is made at the end of the module, after all the patterns that it joins.
