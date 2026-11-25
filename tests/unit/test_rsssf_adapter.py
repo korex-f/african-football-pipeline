@@ -263,3 +263,33 @@ def test_parse_tables_gives_the_rows_and_logs_the_problems(logger, tmp_path):
     assert "El-Kanemi Warriors" in adapter.problems[0]
     log = next((tmp_path / "logs").glob("*")).read_text()
     assert "table row not valid" in log
+
+
+def test_parse_logs_the_league_choice(logger, tmp_path):
+    store, document, url = _stored_page(tmp_path, "gha2024.html", "2023/2024")
+    season = SeasonRecord("2023/2024", 2023, 2024, SeasonStatus.COMPLETED, url=url)
+    adapter, _ = _adapter(logger, {})
+
+    adapter.parse(_league(code="gh_pl"), season, [document], store)
+
+    choice = adapter.league_choice
+    assert choice is not None
+    assert (choice.reason, choice.alternatives[0]) == (
+        "first league",
+        "MTN FA Cup 2023/24",
+    )
+    log = next((tmp_path / "logs").glob("*")).read_text()
+    assert "league 'Ghana Premier League' (first league)" in log
+
+
+def test_rsssf_league_of_leagues_yaml_is_used(logger, tmp_path):
+    store, document, url = _stored_page(tmp_path, "gha2024.html", "2023/2024")
+    season = SeasonRecord("2023/2024", 2023, 2024, SeasonStatus.COMPLETED, url=url)
+    adapter, _ = _adapter(logger, {})
+
+    # A pattern that the page does not have: no league, not a guess.
+    league = _league(code="gh_pl", rsssf_league="Girabola")
+    assert adapter.parse(league, season, [document], store) == []
+    assert adapter.parse_tables(league, season, [document], store) == []
+    assert adapter.league_choice is not None
+    assert adapter.league_choice.reason == "leagues.yaml: no match"

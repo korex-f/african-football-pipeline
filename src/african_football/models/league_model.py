@@ -33,6 +33,11 @@ class LeagueConfig:
                          league, for example 'National League'. Some pages have
                          lists of different competitions with the same seasons.
                          Empty: use all the lists on the page.
+        rsssf_league:    A regular expression for the name of the national
+                         league on the RSSSF season pages, for example
+                         'Girabola|Campeonato Nacional'. Empty: the rules of
+                         choose_league() decide (decision 24). Use it only
+                         when the rules choose wrongly for this league.
     """
 
     code: str
@@ -48,3 +53,4 @@ class LeagueConfig:
     fetch_cards: bool = False
     rsssf_index: str = ""
     rsssf_section: str = ""
+    rsssf_league: str = ""

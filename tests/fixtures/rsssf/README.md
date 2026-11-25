@@ -30,3 +30,23 @@ Each file shows one form of the pages ([decision 22](../../../docs/decisions/002
 | `seasons/egy53.html` | https://www.rsssf.org/tablese/egy53.html | Tarek Said and RSSSF | 21 Mar 2007 | The results of each team as a grid (not read; reported) |
 | `seasons/egy95.html` | https://www.rsssf.org/tablese/egy95.html | Josef Bobrowsky and RSSSF | 27 Sep 1999 | A final table only; a cup final with a label (`Cup Final:`) |
 | `seasons/nig99.html` | https://www.rsssf.org/tablesn/nig99.html | Eric Boesenberg, Karel Stokkermans, Hans Schöggl and RSSSF | 7 Jun 2013 | Dates of two days (`[Mar 24,25]`); rounds without a date |
+
+## Season pages of other countries (`seasons/`, decision 24)
+
+These pages come from a survey of 56 African countries (November 2026). Each shows one rule of the choice of the national league. `tests/unit/test_rsssf_league_choice.py` reads them.
+
+| File | Page | Authors | Last updated (on the page) | Form that the file shows |
+|---|---|---|---|---|
+| `seasons/kaapv2024.html` | https://www.rsssf.org/tablesk/kaapv2024.html | José Batalha and RSSSF | 25 Jan 2025 | Nine island leagues, no national league |
+| `seasons/kaapv95.html` | https://www.rsssf.org/tablesk/kaapv95.html | José Batalha and RSSSF | 8 Sep 2002 | The national league after the page title |
+| `seasons/kam2011.html` | https://www.rsssf.org/tablesk/kam2011.html | Hans Schöggl and RSSSF | 5 Jul 2017 | The cup has results; the league has only its table |
+| `seasons/maro2012.html` | https://www.rsssf.org/tablesm/maro2012.html | Ian King and RSSSF | 16 Jun 2021 | The same, in Morocco ('GNF I') |
+| `seasons/egy2011.html` | https://www.rsssf.org/tablese/egy2011.html | Tarek Said, Hans Schöggl and RSSSF | 31 Aug 2025 | The same, in Egypt: the cup was the league before |
+| `seasons/tun2026.html` | https://www.rsssf.org/tablest/tun2026.html | Karel Stokkermans and RSSSF | 16 Jul 2026 | 'Ligue Professionnelle 2' is a lower level |
+| `seasons/nig06.html` | https://www.rsssf.org/tablesn/nig06.html | José Batalha and RSSSF | 27 Sep 2018 | A first stage with more results than the final stage |
+| `seasons/sier01.html` | https://www.rsssf.org/tabless/sier01.html | Hans Schöggl, José Batalha and RSSSF | 27 Sep 2003 | Groups first, then the national league |
+| `seasons/niger03.html` | https://www.rsssf.org/tablesn/niger03.html | José Batalha and RSSSF | 18 Jan 2004 | A French league name in lower case |
+| `seasons/moz08.html` | https://www.rsssf.org/tablesm/moz08.html | José Batalha and RSSSF | 20 Mar 2009 | A row of a table of participants and a result line without a space ('Liga ...') |
+| `seasons/ethi08.html` | https://www.rsssf.org/tablese/ethi08.html | Mamo Gebrehiwot and RSSSF | 1 Dec 2016 | A sentence before the league heading |
+| `seasons/reunion2022.html` | https://www.rsssf.org/tablesr/reunion2022.html | Hans Schöggl and RSSSF | 12 Jul 2023 | 'Régional 1' is the top league of Réunion |
+

@@ -112,4 +112,5 @@ def _parse_league_entry(entry: dict) -> LeagueConfig:
         fetch_cards=entry.get("fetch_cards", False),
         rsssf_index=entry.get("rsssf_index", ""),
         rsssf_section=entry.get("rsssf_section", ""),
+        rsssf_league=entry.get("rsssf_league", ""),
     )

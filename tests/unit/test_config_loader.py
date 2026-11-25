@@ -57,6 +57,27 @@ class TestLoadLeagues:
         assert league.fetch_scorers is True
         assert league.fetch_cards is True
 
+    def test_rsssf_fields_default_to_empty(self, tmp_path, sample_league_yaml_data):
+        league = load_leagues(write_yaml(tmp_path, sample_league_yaml_data))[0]
+        assert (league.rsssf_index, league.rsssf_section, league.rsssf_league) == (
+            "",
+            "",
+            "",
+        )
+
+    def test_rsssf_fields_load_when_present(self, tmp_path, sample_league_yaml_data):
+        data = sample_league_yaml_data.copy()
+        data["leagues"][0].update(
+            {
+                "rsssf_index": "tablesa/angchamp.html",
+                "rsssf_section": "National League",
+                "rsssf_league": "Girabola|Campeonato Nacional",
+            }
+        )
+        league = load_leagues(write_yaml(tmp_path, data))[0]
+        assert league.rsssf_league == "Girabola|Campeonato Nacional"
+        assert league.rsssf_section == "National League"
+
     def test_loads_multiple_leagues(self, tmp_path, sample_league_yaml_data):
         data = sample_league_yaml_data.copy()
         data["leagues"].append(

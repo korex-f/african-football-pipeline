@@ -46,7 +46,13 @@ from african_football.sources.rsssf.index import (
     parse_index,
     select_section,
 )
-from african_football.sources.rsssf.parser import parse_page
+from african_football.sources.rsssf.parser import (
+    LeagueChoice,
+    choose_league,
+    parse_page,
+    season_part,
+    split_competitions,
+)
 from african_football.sources.rsssf.tables import parse_tables
 from african_football.utils.logger import PipelineLogger
 
@@ -88,6 +94,8 @@ class RsssfAdapter:
         # The problems of the last parse(), for example the lines that look
         # like a result but that the parser could not read.
         self.problems: list[str] = []
+        # The league choice of the last parse() (decision 24).
+        self.league_choice: Optional[LeagueChoice] = None
 
     async def discover_seasons(self, league: LeagueConfig) -> list[SeasonRecord]:
         """Give the seasons of the league that RSSSF has, oldest first.
@@ -162,8 +170,10 @@ class RsssfAdapter:
             raise RsssfConfigError(f"Season {season.season} has no RSSSF page")
         document = documents[0]
         _page_url, anchor = urldefrag(season.url)
+        page = store.load(document)
+        self._log_league_choice(page, anchor, league, season)
         matches, self.problems = parse_page(
-            store.load(document),
+            page,
             league_code=league.code,
             season=season.season,
             start_year=season.start_year,
@@ -172,6 +182,7 @@ class RsssfAdapter:
             source_url=season.url,
             raw_documents=(document.sha256,),
             anchor=anchor,
+            league_pattern=league.rsssf_league,
         )
         for problem in self.problems:
             self.logger.log(f"RSSSF {season.season}: {problem}", level="WARNING")
@@ -199,11 +210,35 @@ class RsssfAdapter:
             league_code=league.code,
             season=season.season,
             anchor=anchor,
+            league_pattern=league.rsssf_league,
         )
         self.problems = self.problems + problems
         for problem in problems:
             self.logger.log(f"RSSSF {season.season}: {problem}", level="WARNING")
         return rows
+
+    def _log_league_choice(
+        self, page: str, anchor: str, league: LeagueConfig, season: SeasonRecord
+    ) -> None:
+        """Write the competition that choose_league() took, why, and the
+        other competitions, to the log (decision 24). Thus a wrong choice is
+        visible, and rsssf_league in leagues.yaml can correct it."""
+        part = season_part(page, anchor) if anchor else page
+        if part is None:
+            return
+        self.league_choice = choose_league(
+            split_competitions(part), league.rsssf_league
+        )
+        name = (
+            self.league_choice.competition.name
+            if self.league_choice.competition
+            else "no league"
+        )
+        others = "; ".join(self.league_choice.alternatives) or "none"
+        self.logger.log(
+            f"RSSSF {season.season}: league {name!r} ({self.league_choice.reason}); "
+            f"other competitions: {others}"
+        )
 
     def _season_record(
         self, entry: IndexEntry, index_url: str

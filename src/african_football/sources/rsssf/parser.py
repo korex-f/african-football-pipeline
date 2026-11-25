@@ -68,9 +68,73 @@ _STAGE_TAG = re.compile(r"^\s*<(b|u)>(?P<text>.*?)</\1>\s*$", re.IGNORECASE)
 _UNDERLINE = re.compile(r"^\s*={3,}\s*$")
 
 # A competition heading without a line of '=' (structure B).
+# The words in English, French and Portuguese: the pages of all African
+# countries use them (decision 24).
 _COMPETITION_HEADING = re.compile(
-    r"^(?=[A-Z])(?=[^:\[\]]*\b(?:League|Division|Level|Cup|Shield|Championship"
-    r"|Tournament|Trophy)\b)[^:\[\]]{3,80}$"
+    r"^(?=[A-Z])(?=[^:\[\]]*\b(?i:League|Ligue|Liga|Division|Divis[aã]o|Level|Cup"
+    r"|Coupe|Copa|Ta[çc]a|Shield|Championship|Championnat|Campeonato|Tournament"
+    r"|Tournoi|Torneio|Trophy|Botola|Premiership|Supercoupe|Super ?Ta[çc]a)\b)"
+    r"[^:\[\]]{3,80}$"
+)
+
+# The kinds of competition names, for choose_league() (decision 24).
+_CUP = re.compile(
+    r"\b(?:cup|coupe|copa|ta[çc]a|trophy|shield|super ?cup|supercoupe"
+    r"|super ?ta[çc]a|charity|challenge|knock-?out|kass|tournament|tournoi"
+    r"|torneio|trofeo)\b",
+    re.IGNORECASE,
+)
+_LOWER = re.compile(
+    r"\b(?:second|third|fourth|2nd|3rd|4th|deuxi[eè]me|2[eè]me|2e|troisi[eè]me"
+    r"|3[eè]me|segunda|terceira|ii|iii|iv|two|three|lower|amateur|regional"
+    r"|provincial|district|distrital|distrito|reserves?|youth|juniors?|women"
+    r"|ladies|f[ée]minine?|u-?\d{2}|promotion|qualif\w*|stream)\b"
+    # 'Régional 1' is the top league of Réunion: not lower.
+    r"|\br[ée]gionale?\b(?!\s*1\b)"
+    r"|\b(?:ligue|liga|division|divis[aã]o|level|d)\s*[2-9]\b"
+    # '2ª Divisão', '2nd Division', '2ème Division'.
+    r"|\b[2-9](?:ª|º|nd|rd|th|e|[eè]me)?\s*(?:divis|level|liga|ligue)"
+    # 'Division Nationale B', 'Division 1 North'.
+    r"|\bnationale?\s+[b-d]\b|\b(?:north|south|east|west)(?:ern)?\s*$"
+    # 'Ligue Professionnelle 2'.
+    r"|\s(?:[2-9]|ii|iii|iv|b)\s*$",
+    re.IGNORECASE,
+)
+_PLAYOFF = re.compile(
+    r"\b(?:play-?offs?|barrages?|mini-?league|final (?:round|stage|tournament))\b",
+    re.IGNORECASE,
+)
+_LEAGUE_WORD = re.compile(
+    r"\b(?:league|ligue|liga|division|divis[aã]o|championnat|campeonato"
+    r"|championship|botola|premiership|ligi|super ?ligue|girabola)\b",
+    re.IGNORECASE,
+)
+# The words of a part of a league: 'First Stage', 'Group A' (step 3).
+_STAGE_WORD = re.compile(
+    r"\b(?:stage|phase|round|group|groupe|grupo|poule|s[ée]rie|zone)\b",
+    re.IGNORECASE,
+)
+# An abbreviation of a league name: NPFL, GPL, PSL. Upper case only, thus
+# not a normal word.
+_LEAGUE_ABBREVIATION = re.compile(r"\b[A-Z]{1,4}L\b")
+
+_NATIONAL = re.compile(
+    r"\b(?:national|nacional|nationale|premier|premi[eè]re|1[eè]re|1re|1st|first"
+    r"|[ée]lite|primeira|primera|botola|ligi kuu|professional|professionnelle"
+    r"|premiership|super ?league|super ?ligue|girabola|ligue ?1|liga ?1"
+    r"|division ?(?:1|one|i))\b",
+    re.IGNORECASE,
+)
+# Small words that a competition name can have: 'Championnat National de
+# 1ère Division', 'Ligue du Protectorat Français au Maroc'.
+_CONNECTORS = frozenset(
+    "de da do das dos du des la le les l d of and e et del el au aux the".split()
+)
+
+_NOTE_WORDS = re.compile(
+    r"\b(?:the|of|to|for|in|were|was|after|before|since|qualify|qualified"
+    r"|withdrew|due|played|because|no|not|held|between|only)\b",
+    re.IGNORECASE,
 )
 
 # Lines that can come after a final table, in the same competition.
@@ -169,10 +233,15 @@ _SPACES = re.compile(r"\s+")
 
 @dataclass(frozen=True)
 class Competition:
-    """One competition of a season page: its name and the text of its block."""
+    """One competition of a season page: its name and the text of its block.
+
+    is_title: True for the first part of a structure B page, which has the
+    title of the page as its name ('Nigeria 2003'). This part is the league.
+    """
 
     name: str
     text: str
+    is_title: bool = False
 
 
 @dataclass(frozen=True)
@@ -269,7 +338,8 @@ def split_one_block(text: str, first_name: str) -> list[Competition]:
     def close(new_name: str) -> None:
         nonlocal name, current, has_results, final_table, in_table
         if any(line.strip() for line in current):
-            competitions.append(Competition(name, "\n".join(current)))
+            is_title = not competitions and name == first_name
+            competitions.append(Competition(name, "\n".join(current), is_title))
         name, current = new_name, []
         has_results = final_table = in_table = False
 
@@ -281,7 +351,17 @@ def split_one_block(text: str, first_name: str) -> list[Competition]:
         if line.strip() and _UNDERLINE.match(next_line):
             close(_clean(line))
             continue
-        if _COMPETITION_HEADING.match(line) and not _is_result(line):
+        if (
+            _COMPETITION_HEADING.match(line)
+            and not _is_result(line)
+            and not _is_note(line)
+            # A row of a table of participants ('Liga Muçulmana    Maputo
+            # Cidade de Maputo') has gaps of two or more spaces.
+            and not re.search(r"\S {2,}\S|\t", line.strip())
+            # A line with a score is a result, also without a space
+            # ('Estrela Vermelha2-0 Liga Muçulmana').
+            and not re.search(r"\d-\d", line)
+        ):
             close(_clean(line))
             continue
         if _FINAL_TABLE.match(line):
@@ -333,12 +413,198 @@ def season_part(page: str, anchor: str) -> Optional[str]:
     return f"<h2>{title}</h2>\n<pre>{body}</pre>"
 
 
-def top_league(page: str) -> Optional[Competition]:
-    """Give the first competition of the page that has a result line."""
-    for competition in split_competitions(page):
-        if any(_is_result(_clean_line(line)) for line in competition.text.splitlines()):
-            return competition
-    return None
+@dataclass(frozen=True)
+class LeagueChoice:
+    """
+    The competition of a page that choose_league() took as the league.
+
+    competition:  the chosen competition, or None.
+    reason:       why: 'leagues.yaml', 'national name', 'first league',
+                  'tables only' or 'fallback'.
+    alternatives: the names of the other competitions with results or a
+                  table. The log shows them, thus a wrong choice is
+                  visible.
+    """
+
+    competition: Optional[Competition]
+    reason: str
+    alternatives: tuple[str, ...] = ()
+
+
+def competition_kind(name: str) -> str:
+    """Give the kind of a competition name: 'unnamed', 'note', 'cup',
+    'lower', 'playoff' or 'league'.
+
+    'unnamed' is a part of a page without a heading, for example the text
+    after a final table. It is something other than the league.
+
+    'note' is a sentence that a page has at the place of a heading, for
+    example 'Winners qualify for CAF Cup.'. 'league' is all other names: a
+    league name, or a page title such as 'Egypt 2004/05'.
+    """
+    if not name.strip():
+        return "unnamed"
+    if _is_note(name):
+        return "note"
+    if _CUP.search(name):
+        return "cup"
+    if _LOWER.search(name):
+        return "lower"
+    if _PLAYOFF.search(name):
+        return "playoff"
+    return "league"
+
+
+def choose_league(
+    competitions: list[Competition], league_pattern: str = ""
+) -> LeagueChoice:
+    """Choose the national league among the competitions of a page.
+
+    The steps (decision 24):
+    1. leagues.yaml (league_pattern): the first competition whose name
+       matches it, and that has results or a final table. If no name
+       matches, the page has no league: the rules do not guess.
+    2. The candidates: competitions with results or a final table whose
+       kind is 'league' (not a cup, a lower level, a play-off or a note).
+       If the first candidate and 3 or more others have only a place name
+       ('Boa Vista', 'Brava', 'Fogo', ...), the page has regional leagues
+       only: no league.
+    3. If the first candidate has no league word (for example 'Boa Vista',
+       an island league of Cape Verde) and a later candidate has a national
+       name ('Campeonato Nacional'), the later candidate. An abbreviation
+       that ends with L ('NPFL 2023/24') is a league word: else the NPFL
+       page gives 'Nigeria National League', the second level. The title
+       part of a structure B page ('Nigeria 2003') is the league: this step
+       does not apply to it.
+    4. Else the first candidate with results; else the first candidate (a
+       page with tables only).
+    5. Else the first competition with results that is not a cup, as a
+       fallback. The reason gives its kind, for example 'fallback (lower)'.
+    """
+    with_data = [c for c in competitions if _has_results(c) or _has_table(c)]
+    names = tuple(c.name for c in with_data)
+
+    def choice(competition: Competition, reason: str) -> LeagueChoice:
+        others = tuple(n for n in names if n != competition.name)
+        return LeagueChoice(competition, reason, others)
+
+    if league_pattern:
+        for competition in with_data:
+            if re.search(league_pattern, competition.name, re.IGNORECASE):
+                return choice(competition, "leagues.yaml")
+        # leagues.yaml names the league, and the page does not have it.
+        return LeagueChoice(None, "leagues.yaml: no match", names)
+
+    candidates = [c for c in with_data if competition_kind(c.name) == "league"]
+    if candidates:
+        first = candidates[0]
+        # Many candidates with only a place name ('Boa Vista', 'Brava',
+        # 'Fogo', ...): the page has the regional leagues of a season, and
+        # not the national league.
+        place_names = [
+            c
+            for c in candidates
+            if not c.is_title
+            and not _has_league_word(c.name)
+            and not _STAGE_WORD.search(c.name)
+            and not _NATIONAL.search(c.name)
+            # A season of a page with many seasons ('1938/39') is not a
+            # place.
+            and not re.search(r"\b(?:18|19|20)\d{2}\b", c.name)
+        ]
+        if first in place_names and len(place_names) >= 4:
+            return LeagueChoice(None, "regional leagues only", names)
+        if not first.is_title and not _has_league_word(first.name):
+            for competition in candidates[1:]:
+                national = _NATIONAL.search(competition.name) and _LEAGUE_WORD.search(
+                    competition.name
+                )
+                # A stage of the league ('First Stage') stays the choice
+                # unless the national competition has more results.
+                if national and (
+                    not _STAGE_WORD.search(first.name)
+                    or _result_count(competition) > _result_count(first)
+                ):
+                    return choice(competition, "national name")
+        for competition in candidates:
+            if _has_results(competition):
+                return choice(competition, "first league")
+        return choice(first, "tables only")
+
+    # No competition of the kind 'league'. A cup is never the league. A
+    # lower level, a play-off or a part without a name can be the only
+    # league data of the page (for example the provincial championships of
+    # Angola before 1979); the reason shows it.
+    for competition in with_data:
+        kind = competition_kind(competition.name)
+        if kind != "cup" and _has_results(competition):
+            return choice(competition, f"fallback ({kind})")
+    return LeagueChoice(None, "none", names)
+
+
+def top_league(page: str, league_pattern: str = "") -> Optional[Competition]:
+    """Give the competition of the page that is the national league, or
+    None if the page has no competition with results."""
+    choice = choose_league(split_competitions(page), league_pattern)
+    if choice.competition is None or not _has_results(choice.competition):
+        return None
+    return choice.competition
+
+
+def _has_results(competition: Competition) -> bool:
+    return any(_is_result(_clean_line(line)) for line in competition.text.splitlines())
+
+
+def _has_table(competition: Competition) -> bool:
+    """True for a final-table heading, or for 3 or more table rows. Some
+    pages give the table of a league without a heading, directly under the
+    name of the competition ('NSL League - Final Table 1986')."""
+    lines = [_clean_line(line) for line in competition.text.splitlines()]
+    if any(re.match(r"^\s*Final Tables?\b", line, re.IGNORECASE) for line in lines):
+        return True
+    rows = sum(bool(re.match(r"^\s*\d+\.\s*\S.*\s\d", line)) for line in lines)
+    return rows >= 3
+
+
+def _vocabulary_pattern() -> re.Pattern[str]:
+    """The words of competition names, in all forms: a name in lower case
+    ('Championnat national de première division') is not a sentence."""
+    parts = [r.pattern for r in (_CUP, _LOWER, _PLAYOFF, _LEAGUE_WORD, _NATIONAL)]
+    return re.compile("|".join(f"(?:{p})" for p in parts), re.IGNORECASE)
+
+
+def _result_count(competition: Competition) -> int:
+    return sum(_is_result(_clean_line(line)) for line in competition.text.splitlines())
+
+
+def _has_league_word(name: str) -> bool:
+    return bool(_LEAGUE_WORD.search(name) or _LEAGUE_ABBREVIATION.search(name))
+
+
+def _is_note(name: str) -> bool:
+    """True for a sentence, not a name.
+
+    A sentence ends with '.', or is long, or has more than 5 words and words
+    such as 'the', 'were', or has 3 or more words in lower case that are not
+    connectors ('Santo Antão (South Zone) no provincial championship held').
+    """
+    # A note in brackets is a part of a name: 'Championnat National de 1ère
+    # Division [aka Primus Ligue]'.
+    name = re.sub(r"\[[^\]]*\]?|\([^)]*\)?", "", name).strip()
+    words = name.split()
+    lower = [
+        w
+        for w in words
+        if w[:1].islower()
+        and w.strip("(),'").lower() not in _CONNECTORS
+        and not _VOCABULARY.search(w)
+    ]
+    return (
+        name.rstrip().endswith(".")
+        or len(words) > 9
+        or (len(words) > 5 and _NOTE_WORDS.search(name) is not None)
+        or len(lower) >= 3
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -560,12 +826,16 @@ def parse_page(
     source_url: str,
     raw_documents: tuple[str, ...],
     anchor: str = "",
+    league_pattern: str = "",
 ) -> tuple[list[SourceMatch], list[str]]:
     """Give the matches of the top league of a page, and the problems.
 
     anchor: for a page with many seasons, the anchor of the season (from the
     season URL, for example '72' in nig72.html#72). The parser reads only
     the part of the page for that season.
+
+    league_pattern: the rsssf_league of leagues.yaml, or ''. See
+    choose_league().
 
     The problems are the lines that look like a result but were not read,
     and the rows that are not a valid SourceMatch.
@@ -575,7 +845,7 @@ def parse_page(
         if part is None:
             return [], [f"no season part for the anchor #{anchor}"]
         page = part
-    competition = top_league(page)
+    competition = top_league(page, league_pattern)
     if competition is None:
         # No result lines. A page with the results only as a grid must not
         # look the same as a page without results.
@@ -621,3 +891,6 @@ def _clean(text: str) -> str:
 def _clean_line(line: str) -> str:
     """Remove the HTML tags of a line, and keep its spaces and tabs."""
     return html.unescape(_TAG.sub("", line)).rstrip()
+
+
+_VOCABULARY = _vocabulary_pattern()
