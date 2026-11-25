@@ -11,10 +11,11 @@ import psycopg
 import pytest
 
 from african_football.db.loader import RunRecorder
-from african_football.db.reader import read_season_matches
+from african_football.db.reader import read_season_matches, read_season_tables
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord, SeasonStatus
 from african_football.models.source_match import MatchStatus, SourceMatch
+from african_football.models.source_table import SourceTableRow
 
 pytestmark = pytest.mark.db
 
@@ -229,3 +230,34 @@ def test_single_source_never_replaces_verified(conn, ghana_pl):
 
     assert _coverage(conn) == (6, 6, "verified")
     assert summary.coverage_status == "verified"
+
+
+def test_read_gives_back_the_loaded_table(conn, ghana_pl):
+    rows = [
+        SourceTableRow(
+            source="rsssf",
+            league_code="gh_pl",
+            season="2023/2024",
+            stage=stage,
+            row_number=number,
+            position=number,
+            team_raw=team,
+            played=2,
+            won=won,
+            drawn=0,
+            lost=2 - won,
+            goals_for=3,
+            goals_against=1,
+            points=won * 3,
+            note=note,
+        )
+        for stage, number, team, won, note in [
+            ("Group A", 1, "Hearts of Oak", 2, "Qualified"),
+            ("Group A", 2, "Kotoko", 0, None),
+            ("Group B", 1, "Medeama", 1, "[-3]"),
+        ]
+    ]
+    RunRecorder.start(conn, ghana_pl, SEASON, "rsssf", "1.2.0").load([], [], rows)
+
+    assert read_season_tables(conn, "gh_pl", "2023/2024", "rsssf") == rows
+    assert read_season_tables(conn, "gh_pl", "2023/2024", "soccerway") == []

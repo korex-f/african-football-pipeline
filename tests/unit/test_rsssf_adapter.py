@@ -248,3 +248,18 @@ def test_parse_without_a_document(logger, tmp_path):
     store = RawStore(tmp_path, "rsssf", "npfl", "1972")
     with pytest.raises(RsssfConfigError, match="no stored page"):
         adapter.parse(_league(), _season("x"), [], store)
+
+
+def test_parse_tables_gives_the_rows_and_logs_the_problems(logger, tmp_path):
+    store, document, url = _stored_page(tmp_path, "nig99.html", "1999")
+    season = SeasonRecord("1999", 1999, 1999, SeasonStatus.COMPLETED, url=url)
+    adapter, http = _adapter(logger, {})
+
+    rows = adapter.parse_tables(_league(), season, [document], store)
+
+    assert len(rows) == 17
+    assert http.urls == []
+    assert len(adapter.problems) == 1
+    assert "El-Kanemi Warriors" in adapter.problems[0]
+    log = next((tmp_path / "logs").glob("*")).read_text()
+    assert "table row not valid" in log

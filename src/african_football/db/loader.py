@@ -33,6 +33,7 @@ Typical usage:
             raise
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import LiteralString
@@ -42,6 +43,7 @@ import psycopg
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord
 from african_football.models.source_match import SourceMatch
+from african_football.models.source_table import SourceTableRow
 from african_football.sources.base import RawDocument
 
 # The data columns of source_matches, in the sequence of the INSERT. The
@@ -167,6 +169,8 @@ class LoadSummary:
                         now. They stay in the table.
     expected_matches:   n * (n - 1) for the n teams of this run.
     coverage_status:    the status in season_coverage after this run.
+    table_rows:         the final table rows that the run wrote. 0: the run
+                        had no table, and a stored table did not change.
     """
 
     pages_fetched: int
@@ -177,6 +181,29 @@ class LoadSummary:
     matches_not_seen: int
     expected_matches: int
     coverage_status: str
+    table_rows: int = 0
+
+
+# The columns of source_tables that come from a SourceTableRow, in the
+# sequence of the INSERT.
+_TABLE_COLUMNS: tuple[LiteralString, ...] = (
+    "stage",
+    "row_number",
+    "position",
+    "team_raw",
+    "played",
+    "won",
+    "drawn",
+    "lost",
+    "goals_for",
+    "goals_against",
+    "points",
+    "note",
+)
+_INSERT_TABLE_ROW = f"""
+    INSERT INTO source_tables (season_id, run_id, source, {", ".join(_TABLE_COLUMNS)})
+    VALUES (%s, %s, %s, {", ".join("%s" for _ in _TABLE_COLUMNS)})
+"""
 
 
 class RunRecorder:
@@ -255,13 +282,23 @@ class RunRecorder:
         return cls(conn, run_row[0], season_id, source, run_row[1])
 
     def load(
-        self, documents: list[RawDocument], matches: list[SourceMatch]
+        self,
+        documents: list[RawDocument],
+        matches: list[SourceMatch],
+        tables: Sequence[SourceTableRow] = (),
     ) -> LoadSummary:
-        """Write the pages and the matches, and mark the run 'succeeded'.
+        """Write the pages, the matches and the tables, and mark the run
+        'succeeded'.
 
         Give the matches in the sequence of the source page. The position of
         each match in the list goes into page_position. The exports use it to
         keep the page sequence.
+
+        tables: the rows of the final tables of the season (decision 23). If
+        there are rows, they replace the stored table of the season and the
+        source: a table is one unit, and a newer page supersedes it. If there
+        are no rows, the stored table does not change: a run that did not
+        find the table must not remove it.
 
         This is one transaction. If a write fails, nothing of this method
         stays, and the run stays 'running'. Call fail() then.
@@ -326,6 +363,22 @@ class RunRecorder:
                 ).fetchone()
                 assert coverage_row is not None
 
+            if tables:
+                self.conn.execute(
+                    "DELETE FROM source_tables WHERE season_id = %s AND source = %s",
+                    (self.season_id, self.source),
+                )
+                for table_row in tables:
+                    self.conn.execute(
+                        _INSERT_TABLE_ROW,
+                        (
+                            self.season_id,
+                            self.run_id,
+                            self.source,
+                            *(getattr(table_row, c) for c in _TABLE_COLUMNS),
+                        ),
+                    )
+
             pages_fetched = sum(
                 1 for doc in documents if doc.fetched_at >= self.started_at
             )
@@ -353,6 +406,7 @@ class RunRecorder:
             matches_not_seen=not_seen_row[0],
             expected_matches=coverage_row[0],
             coverage_status=coverage_row[1],
+            table_rows=len(tables),
         )
 
     def fail(self, error: BaseException) -> None:
