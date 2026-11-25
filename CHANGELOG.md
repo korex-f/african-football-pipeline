@@ -2,6 +2,34 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: Final tables and the table check (roadmap step 4, part 3)
+
+**What happened:** The RSSSF adapter now reads the final tables of the top league (`RsssfAdapter.parse_tables`). The loader writes them to the new table `source_tables` (migration 002). `table_check()` compares a table with the matches. The pipeline does not use RSSSF yet (part 4).
+
+**Why it was necessary:** Decision 7: a season is verified when the number of matches is correct **and** an independent source agrees **or** the goals agree with a final table. The tables give the second test.
+
+**How the project did it:**
+
+- `models/source_table.py`: `SourceTableRow` (Pydantic). Won + drawn + lost must be played.
+- `sources/rsssf/tables.py`: finds the `Final Table(s)` blocks of the top league and reads the rows. Rows in other forms are problems ([decision 23](docs/decisions/0023-final-tables-and-the-table-check.md)).
+- `table_check()`: compares the number of matches and the goals by sums, without team names.
+- `db/migrations/002_source_tables.sql`, `RunRecorder.load(..., tables)` and `read_season_tables()`. A run with table rows replaces the table of the season and the source; a run without table rows does not change it.
+- The techniques are in the module READMEs: [rsssf](src/african_football/sources/rsssf/README.md) sections 16 to 18, [db](src/african_football/db/README.md) section 14.
+
+**Verification:**
+
+1. **All 187 pages:** 2,074 table rows of 131 seasons. 37 problems, each real: 26 rows in two short forms, 9 rows where won + drawn + lost is not played (typos on the pages), 2 pages with two different final tables.
+2. **The check:** 53 of 86 tables agree exactly with the matches. Ghana 2023/24 agrees (306 matches, 628 goals), and Soccerway agrees with RSSSF for the same season: the two tests of decision 7. The other tables show real properties of the seasons: missing results, deductions of goals, replays, typos.
+3. 28 new tests. The database tests check the replacement of a table, a run without a table, the table of a different source, and the `CHECK` constraint.
+4. 12 deliberate breaks, each caught. Break 11 (a walkover without a score counted as a found match) needed a new test.
+5. 369 tests pass. basedpyright gives 0 errors.
+
+**Trade-offs:**
+
+- The check uses sums, thus it does not show which team is wrong.
+- Rows in other forms are not read.
+- `parse_tables` is not in the `SourceAdapter` Protocol: only RSSSF gives tables.
+
 ## November 2026: RSSSF parser (roadmap step 4, part 2)
 
 **What happened:** `RsssfAdapter.parse` now reads the matches of the top league from an RSSSF season page. The pipeline does not use RSSSF yet (part 4).

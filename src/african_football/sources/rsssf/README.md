@@ -7,6 +7,7 @@ This folder has the adapter for RSSSF, the Rec.Sport.Soccer Statistics Foundatio
 | `index.py` | Reads a list of champions, and gives one `IndexEntry` for each season line |
 | `http.py` | Gets pages: one at a time, with an interval, with retries |
 | `parser.py` | Reads the matches of the top league from a season page ([decision 22](../../../../docs/decisions/0022-rsssf-parser.md)) |
+| `tables.py` | Reads the final tables of the top league, and compares a table with the matches ([decision 23](../../../../docs/decisions/0023-final-tables-and-the-table-check.md)) |
 | `adapter.py` | `RsssfAdapter`: `discover_seasons`, `fetch` and `parse` |
 
 The RSSSF pages are the work of their authors. Their licence permits copies when the authors are acknowledged. The fixtures in `tests/fixtures/rsssf/` name the authors in their README.
@@ -189,3 +190,31 @@ A page with only a results grid gives a problem. Thus it does not look the same 
 The first version of the parser was correct for the 15 sample pages of the survey. On all 187 pages, a report for each season showed the problems: a league with 80 of 242 matches, 8 seasons with the same 5 matches, a page where the table was the league. The report compared the number of matches with n × (n − 1) for n teams, the dates with the years of the season, and the number of problems.
 
 The fixtures in `tests/fixtures/rsssf/seasons/` are the pages that showed each form. Each fixture test has a number from this report, checked against the page.
+
+## 16. A check without names: sums
+
+**What:** `table_check()` compares a final table with the matches by two sums:
+
+| | From the table | From the matches |
+|---|---|---|
+| Matches | sum of `played` ÷ 2 | played and awarded matches with a score |
+| Goals | sum of `goals for` | sum of the goals of these matches |
+
+**Why:** Each match is in the table two times: one time for each team. Thus the sum of `played` is two times the number of matches. Each goal is a `goal for` of one team. The sums do not need team names, and the names of a table (`Enyimba FC (Aba)`) are often not the names of the results (`Enyimba`).
+
+**How:** A walkover without a score (`w/o`) is not counted: its goals are not known. An abandoned match is not counted: the table does not have it.
+
+The check is a diagnostic. When it agrees, the season is very probably complete. When it does not agree, the kind of difference tells the cause: few matches (results missing), the same matches but different goals (a deduction of goals), more matches than the table (replays).
+
+## 17. One copy of a table
+
+Many pages have the final table two times, before and after the results. The reader keeps the first table of each stage. It compares a later table of the same stage with the first: a different copy is a problem, because a person must decide which is correct. Without this rule, each table was two times too large, and all the checks failed.
+
+## 18. Silent losses in a filter
+
+A filter that skips lines can lose data without a problem in the report. Two examples from the table reader:
+
+- A rule skipped numbered lists of teams (`1.Stationery Stores FC, Lagos;`), with the test "no digit after the team name". `9.3SC Shooting Stars  38 ...` has a digit at the start of the name, thus the row was skipped. The check of 5 NPFL seasons showed 361 matches for 380: exactly one team of 38 matches.
+- The next version required two number columns. Then `1. Leventis United  22-30` (a short table of 1986) was skipped too: it is a row that must be a problem, not a row that the reader must ignore.
+
+The rule now: a table row has a number after a space, after the team name. The lesson: after a change to a filter, compare the totals before and after, not only the problems.

@@ -20,6 +20,7 @@ from african_football.db.loader import RunRecorder
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord, SeasonStatus
 from african_football.models.source_match import MatchStatus, SourceMatch
+from african_football.models.source_table import SourceTableRow
 from african_football.scraping import scraper as scraper_module
 from african_football.scraping.scraper import PIPELINE_VERSION, FootballScraper
 from african_football.sources.base import RawDocument
@@ -412,3 +413,95 @@ def test_scraper_marks_a_cancelled_run(pipeline_database, ghana_pl, logger, tmp_
 
     with psycopg.connect(pipeline_database) as conn:
         assert _one(conn, "SELECT status FROM collection_runs") == ("failed",)
+
+
+# ---------------------------------------------------------------------------
+# Final tables (decision 23)
+# ---------------------------------------------------------------------------
+
+
+def _table_row(position: int, team: str, **changes: Any) -> SourceTableRow:
+    fields: dict[str, Any] = dict(
+        source="rsssf",
+        league_code="gh_pl",
+        season="2023/2024",
+        stage="Ghana Premier League",
+        row_number=position,
+        position=position,
+        team_raw=team,
+        played=2,
+        won=1,
+        drawn=0,
+        lost=1,
+        goals_for=2,
+        goals_against=2,
+        points=3,
+    )
+    fields.update(changes)
+    return SourceTableRow(**fields)
+
+
+def _start_rsssf(conn: psycopg.Connection, league: LeagueConfig) -> RunRecorder:
+    return RunRecorder.start(conn, league, SEASON, "rsssf", PIPELINE_VERSION)
+
+
+TABLE = [_table_row(1, "Hearts of Oak"), _table_row(2, "Kotoko")]
+
+
+def test_load_writes_the_table(conn, ghana_pl):
+    recorder = _start_rsssf(conn, ghana_pl)
+
+    summary = recorder.load([], [], TABLE)
+
+    assert summary.table_rows == 2
+    rows = conn.execute(
+        "SELECT position, team_raw, run_id FROM source_tables ORDER BY row_number"
+    ).fetchall()
+    assert rows == [
+        (1, "Hearts of Oak", recorder.run_id),
+        (2, "Kotoko", recorder.run_id),
+    ]
+
+
+def test_new_table_replaces_the_old_table(conn, ghana_pl):
+    _start_rsssf(conn, ghana_pl).load([], [], TABLE)
+
+    corrected = [_table_row(1, "Kotoko"), _table_row(2, "Hearts of Oak")]
+    second = _start_rsssf(conn, ghana_pl)
+    second.load([], [], corrected)
+
+    rows = conn.execute(
+        "SELECT team_raw, run_id FROM source_tables ORDER BY row_number"
+    ).fetchall()
+    assert rows == [("Kotoko", second.run_id), ("Hearts of Oak", second.run_id)]
+
+
+def test_run_without_a_table_keeps_the_table(conn, ghana_pl):
+    _start_rsssf(conn, ghana_pl).load([], [], TABLE)
+
+    summary = _start_rsssf(conn, ghana_pl).load([], [])
+
+    assert summary.table_rows == 0
+    assert _one(conn, "SELECT count(*) FROM source_tables") == (2,)
+
+
+def test_table_of_a_different_source_stays(conn, ghana_pl):
+    _start_rsssf(conn, ghana_pl).load([], [], TABLE)
+    other = [_table_row(1, "Hearts of Oak", source="other")]
+    RunRecorder.start(conn, ghana_pl, SEASON, "other", PIPELINE_VERSION).load(
+        [], [], other
+    )
+
+    assert _one(conn, "SELECT count(*) FROM source_tables") == (3,)
+
+
+def test_table_row_that_does_not_add_up_is_refused(conn, ghana_pl):
+    # model_copy(update=...) does not run the Pydantic checks. Thus the
+    # database constraint must stop the row.
+    bad = _table_row(1, "Hearts of Oak").model_copy(update={"won": 2})
+    recorder = _start_rsssf(conn, ghana_pl)
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        recorder.load([], [], [bad])
+
+    assert _one(conn, "SELECT count(*) FROM source_tables") == (0,)

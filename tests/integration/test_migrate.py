@@ -116,8 +116,10 @@ def test_real_migrations_folder():
 def test_real_migrations_make_the_schema(empty_database):
     applied = _migrate(empty_database, MIGRATIONS_DIR)
 
-    assert applied[0] == "001"
-    assert TABLES_OF_001 | {"schema_migrations"} <= _tables(empty_database)
+    assert applied[:2] == ["001", "002"]
+    assert TABLES_OF_001 | {"source_tables", "schema_migrations"} <= _tables(
+        empty_database
+    )
 
 
 @pytest.mark.db

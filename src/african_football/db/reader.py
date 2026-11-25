@@ -18,6 +18,7 @@ Typical usage:
 import psycopg
 
 from african_football.models.source_match import MatchStatus, SourceMatch
+from african_football.models.source_table import SourceTableRow
 
 # The latest succeeded run of the season and the source. Only its matches
 # have last_run_id equal to its run_id.
@@ -112,3 +113,35 @@ def _to_source_match(row: tuple) -> SourceMatch:
         # SourceMatch is strict: it accepts only a MatchStatus, not a str.
         status=MatchStatus(status),
     )
+
+
+_READ_TABLES = """
+    SELECT t.source, s.league_code, s.label, t.stage, t.row_number,
+           t.position, t.team_raw, t.played, t.won, t.drawn, t.lost,
+           t.goals_for, t.goals_against, t.points, t.note
+    FROM source_tables t
+    JOIN seasons s USING (season_id)
+    WHERE s.league_code = %(league_code)s
+      AND s.label = %(season)s
+      AND t.source = %(source)s
+    ORDER BY t.source_table_pk
+"""
+
+
+def read_season_tables(
+    conn: psycopg.Connection, league_code: str, season: str, source: str
+) -> list[SourceTableRow]:
+    """Give the final table rows of a season and a source.
+
+    The rows are in the sequence of the page (the sequence of the INSERT).
+    Each row becomes a SourceTableRow again, thus Pydantic checks it again.
+    """
+    rows = conn.execute(
+        _READ_TABLES,
+        {"league_code": league_code, "season": season, "source": source},
+    ).fetchall()
+    fields = (
+        "source league_code season stage row_number position team_raw played "
+        "won drawn lost goals_for goals_against points note"
+    ).split()
+    return [SourceTableRow(**dict(zip(fields, row))) for row in rows]
