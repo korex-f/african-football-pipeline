@@ -35,3 +35,4 @@ Each file is one decision. A decision file is not deleted. If the project change
 | 27 | [Table rows on RSSSF pages: two more full forms, and short forms stay problems](0027-table-row-forms.md) |
 | 28 | [Lists of champions on RSSSF: more season-line forms](0028-index-line-forms.md) |
 | 29 | [Dates on RSSSF pages: the years from the page title, a tested window, and more month names](0029-dates.md) |
+| 30 | [RSSSF in the pipeline: a source option, a source folder for the files, and a check of the migrations](0030-rsssf-in-the-pipeline.md) |
