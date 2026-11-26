@@ -32,3 +32,4 @@ Each file is one decision. A decision file is not deleted. If the project change
 | 24 | [Choosing the national league on an RSSSF page: rules, an override, and a visible choice](0024-choosing-the-national-league-on-a-page.md) |
 | 25 | [Result lines on RSSSF pages of all African countries: more forms, more guards, and full notes](0025-result-line-forms.md) |
 | 26 | [Final tables on RSSSF pages of all African countries: more heading words, and complete plain tables](0026-table-headings.md) |
+| 27 | [Table rows on RSSSF pages: two more full forms, and short forms stay problems](0027-table-row-forms.md) |
