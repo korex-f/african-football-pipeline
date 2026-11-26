@@ -7,6 +7,7 @@ in the page tests come from the reader output, after a check against the
 page. The tests do not use the network.
 """
 
+from collections import Counter
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -186,7 +187,9 @@ def test_row_forms():
     ]
 
 
-def test_only_final_tables_are_read():
+def test_tables_that_are_not_final_are_not_read():
+    # A plain 'Table:' that is not complete (decision 26), a table before
+    # the last round, and a sentence.
     rows, _ = _page_tables(
         "Table:\n"
         " 1.Hearts of Oak     10  7  2  1  20-8  23\n"
@@ -245,6 +248,169 @@ def test_table_ends_at_other_text():
         " 1.Not a table row   2  2  0  0  3-1  6\n"
     )
     assert [r.team_raw for r in rows] == ["Hearts of Oak", "Kotoko"]
+
+
+# ---------------------------------------------------------------------------
+# Table headings (decision 26)
+# ---------------------------------------------------------------------------
+
+
+def test_heading_with_a_word_before_final():
+    # 'Reported Final Table:'
+    rows, problems = _tables("gha62.html")
+    assert (len(rows), problems) == (15, [])
+    assert {r.stage for r in rows} == {"Ghana 1961/62"}
+
+
+def test_heading_with_a_note_in_brackets():
+    # 'Final(?) Table:'. The table agrees with the 240 matches.
+    rows, _ = _tables("gha03.html")
+    assert len(rows) == 16
+    [check] = _check("gha03.html", 2003, 2003)
+    assert check.agrees and check.found_matches == 240
+
+
+def test_complete_plain_table_is_the_final_table():
+    # 'Table:', and each of the 16 teams played 30 = 2 x 15 matches.
+    rows, problems = _tables("gha99.html")
+    assert (len(rows), problems) == (16, [])
+    assert {r.played for r in rows} == {30}
+    [check] = _check("gha99.html", 1999, 1999)
+    assert check.agrees and check.found_matches == 240
+
+
+def test_plain_group_tables():
+    # 'Tables:', then 'Zone A' and 'Zone B', 8 teams with 14 matches each.
+    rows, _ = _tables("gha04.html")
+    assert Counter(r.stage for r in rows) == {"Zone A": 8, "Zone B": 8}
+
+
+def test_plain_table_with_a_note_in_square_brackets():
+    # 'Table [from Nando 7/7/00]:', 17 teams with 32 matches each.
+    rows, _ = _tables("nig00.html")
+    assert len(rows) == 17
+    assert (rows[0].team_raw, rows[0].played) == ("Katsina United", 32)
+
+
+COMPLETE = (
+    " 1.Hearts of Oak     4  3  1  0   8-2  10\n"
+    " 2.Kotoko            4  1  2  1   5-5   5\n"
+    " 3.Ashanti           4  0  1  3   2-8   1\n"
+)
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "Final Table:",
+        "Reported Final Table:",
+        "Super Division Final Table:",
+        "Final (official) Table:",
+        "Final Ranking:",
+        "Final Standings:",
+        "Official Table from FECAFOOT:",
+        "Table:",
+        "Reported Table:",
+        "Table (Jan 30):",
+        "Table [June 89]:",
+    ],
+)
+def test_headings_of_a_final_table(heading):
+    # With a result: else the page is a history page (see below).
+    rows, _ = _page_tables(
+        f"Round 1\nHearts of Oak   1-0 Kotoko\n{heading}\n{COMPLETE}"
+    )
+    assert len(rows) == 3
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        # Only the top rows.
+        "Top of Final Table:",
+        "Top Final Table:",
+        # Not final.
+        "Halfway Table:",
+        "Table at abandonment:",
+        # Made from the results: not an independent check.
+        "Table (based on known results):",
+        # A sentence, not a heading.
+        "The final table was not published",
+    ],
+)
+def test_headings_that_are_not_a_final_table(heading):
+    # With a result: a page without results and without a table heading is
+    # a history page, and its table is final.
+    rows, _ = _page_tables(
+        f"Round 1\nHearts of Oak   1-0 Kotoko\n{heading}\n{COMPLETE}"
+    )
+    assert rows == []
+
+
+def test_group_words_in_final_tables():
+    rows, _ = _page_tables(
+        "Final Tables:\n"
+        "Poule A\n"
+        + COMPLETE
+        + "Grupo B:\n"
+        + COMPLETE
+        + "Groupe C (Nord)\n"
+        + COMPLETE
+    )
+    assert Counter(r.stage for r in rows) == {"Poule A": 3, "Grupo B": 3, "Groupe C": 3}
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        # Each team played n - 1 = 2 matches: the half-way table of a double
+        # round-robin looks the same.
+        " 1.Hearts of Oak     2  2  0  0   4-1   6\n"
+        " 2.Kotoko            2  1  0  1   3-3   3\n"
+        " 3.Ashanti           2  0  0  2   1-4   0\n",
+        # Not all teams played 2(n - 1) matches.
+        " 1.Hearts of Oak     4  3  1  0   8-2  10\n"
+        " 2.Kotoko            3  1  1  1   5-5   4\n"
+        " 3.Ashanti           3  0  0  3   2-8   0\n",
+        # A part of a table: the positions are 2, 3 and 6 (Benin 2017).
+        " 2.Hearts of Oak     4  3  1  0   8-2  10\n"
+        " 3.Kotoko            4  1  2  1   5-5   5\n"
+        " 6.Ashanti           4  0  1  3   2-8   1\n",
+        # Two teams: a two-leg tie, not a league.
+        " 1.Hearts of Oak     2  1  1  0   3-2   4\n"
+        " 2.Kotoko            2  0  1  1   2-3   1\n",
+        # A row that the reader cannot read: n is not certain.
+        COMPLETE + " 4.Aduana            4 points\n",
+    ],
+)
+def test_plain_tables_that_are_not_complete(table):
+    rows, problems = _page_tables(f"Table:\n{table}")
+    assert (rows, problems) == ([], [])
+
+
+def test_last_plain_table_of_a_stage_is_used():
+    rows, _ = _page_tables(
+        "Table:\n"
+        " 1.Hearts of Oak     2  2  0  0   4-1   6\n"
+        " 2.Kotoko            2  1  0  1   3-3   3\n"
+        " 3.Ashanti           2  0  0  2   1-4   0\n"
+        "\n"
+        "Round 3\n"
+        "Hearts of Oak   1-1 Kotoko\n"
+        "\n"
+        "Table:\n" + COMPLETE
+    )
+    assert [r.played for r in rows] == [4, 4, 4]
+
+
+def test_final_table_wins_over_a_plain_table():
+    rows, _ = _page_tables(
+        "Table:\n"
+        + COMPLETE
+        + "\nFinal Table:\n"
+        + COMPLETE.replace("Hearts of Oak    ", "Hearts           ")
+    )
+    assert rows[0].team_raw == "Hearts"
 
 
 # ---------------------------------------------------------------------------

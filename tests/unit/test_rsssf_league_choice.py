@@ -269,7 +269,8 @@ def test_sentence_is_not_a_heading():
         # 'Group A' (4 matches), then 'National Premier League' (43, 7 of
         # them with no result: '---').
         ("sier01.html", 2001, 2001, "National Premier League", "national name", 43, 10),
-        # A French name in lower case is not a sentence.
+        # A French name in lower case is not a sentence. Two groups in
+        # 'Final Tables': 'Poule A' and 'Poule B' (decision 26).
         (
             "niger03.html",
             2003,
@@ -277,7 +278,7 @@ def test_sentence_is_not_a_heading():
             "Championnat national de première division",
             "first league",
             180,
-            10,
+            20,
         ),
         # A row of a table of participants is not a heading.
         (

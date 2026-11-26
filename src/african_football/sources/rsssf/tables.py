@@ -50,7 +50,32 @@ from african_football.sources.rsssf.parser import (
 
 # The heading of a final table: 'Final Table:', 'Final Tables:',
 # 'Final Table (given by press):'. Not 'Final table missing.'.
-_FINAL_HEADING = re.compile(r"^\s*Final Tables?\b(?!\s+missing)", re.IGNORECASE)
+# Decision 26 adds up to 3 words before it ('Reported Final Table:', 'Super
+# Division Final Table:'), a note in brackets ('Final (official) Table:'),
+# 'Final Ranking:', 'Final Standings:' and 'Official Table ...:'. A heading
+# that starts with 'Top' ('Top of Final Table:') has only the top rows: it
+# is not a final table.
+_FINAL_HEADING = re.compile(
+    r"^\s*(?!top\b)(?:[\w.'-]+ ){0,3}"
+    r"(?:final\s*(?:\([^)]*\)\s*)?(?:tables?|ranking|standings)|official\s+tables?)\b"
+    # A heading ends with ':', or has only a note in brackets after the
+    # words. Thus 'Final table missing.' and 'The final table was not
+    # published.' are not headings.
+    r"(?:[^:]*:|\s*\([^)]*\))?\s*$",
+    re.IGNORECASE,
+)
+
+# The heading of a plain table (decision 26): 'Table:', 'Tables:',
+# 'Reported Table:', 'Table (Jan 30):', 'Table [June 89]:'. Not a table
+# that the author made from the known results ('Table (based on known
+# results):'): it agrees with the results by construction, thus it is not
+# an independent check.
+_PLAIN_HEADING = re.compile(
+    r"^\s*(?:Reported\s+)?Tables?\s*"
+    r"(?:[(\[](?![^)\]]*(?:based on|known results|compiled|calculated))[^)\]]*[)\]])?"
+    r"\s*:\s*$",
+    re.IGNORECASE,
+)
 
 # Any other table heading ends a final table: 'Table:', 'Table before last
 # round:'.
@@ -72,9 +97,13 @@ _ROW = re.compile(
 # number after a space, not for any digit.
 _HAS_NUMBERS = re.compile(r"^\s*\d+\.\s*\S.*\s\d")
 
-# A group heading in a 'Final Tables:' block.
+# A group heading in a 'Final Tables:' block: 'Group A', 'Group A:', and
+# the French and Portuguese words (decision 26): 'Poule A', 'Groupe A',
+# 'Grupo A'. A note in brackets can follow: 'Group A (Algiers):'.
 _GROUP = re.compile(
-    r"^\s*(?P<name>(?:Group|Zone|Pool|Conference) \w+)\s*$", re.IGNORECASE
+    r"^\s*(?P<name>(?:Group|Groupe|Grupo|Poule|Zone|Pool|Conference) \w+)"
+    r"\s*(?:\(.*\))?\s*:?\s*$",
+    re.IGNORECASE,
 )
 
 # Lines that can be in a table: a separator line, or the next line of a note.
@@ -162,6 +191,14 @@ def parse_tables(
     )
     row_number = 0
 
+    # A plain table ('Table:', 'Reported Table:', or a group heading outside
+    # a final block) can be the final table of its stage (decision 26). The
+    # last plain table of each stage is a candidate: (rows, all rows read).
+    plain_stage: Optional[str] = None
+    plain_rows: list[SourceTableRow] = []
+    plain_read = True
+    candidates: dict[str, tuple[list[SourceTableRow], bool]] = {}
+
     def close_table() -> None:
         """Keep the rows of the table that ends now."""
         nonlocal current
@@ -173,10 +210,18 @@ def parse_tables(
                 )
         current = []
 
+    def close_plain() -> None:
+        """Keep the plain table that ends now as the candidate of its stage."""
+        nonlocal plain_stage, plain_rows, plain_read
+        if plain_stage is not None and (plain_rows or not plain_read):
+            candidates[plain_stage] = (plain_rows, plain_read)
+        plain_stage, plain_rows, plain_read = None, [], True
+
     for raw_line in lines:
         stage_tag = _STAGE_TAG.match(raw_line)
         if stage_tag is not None:
             close_table()
+            close_plain()
             stage = _clean(stage_tag["text"])
             in_final = False
             continue
@@ -184,69 +229,132 @@ def parse_tables(
 
         if _FINAL_HEADING.match(line):
             close_table()
+            close_plain()
             in_final = True
             row_number = 0
             continue
-        if not in_final:
-            continue
 
-        group = _GROUP.match(line)
-        if group is not None:
+        if in_final:
+            group = _GROUP.match(line)
+            if group is not None:
+                close_table()
+                stage = _clean(group["name"])
+                row_number = 0
+                continue
+            if _TABLE_ROW.match(line):
+                if not _HAS_NUMBERS.search(line):
+                    # A numbered list of teams ('1.Stationery Stores FC,
+                    # Lagos;'), not a table row.
+                    continue
+                row_number += 1
+                row, problem = _table_row(line, league_code, season, stage, row_number)
+                if row is not None:
+                    current.append(row)
+                if problem is not None:
+                    problems.append(problem)
+                continue
+            if (
+                _IN_TABLE.match(line)
+                or _OTHER_TABLE.match(line) is None
+                and row_number == 0
+            ):
+                # A blank line, a separator, the next line of a note, or a
+                # line between the heading and the first row ('NB: ...').
+                continue
+            # Any other line ends the final table. It can be the heading of
+            # a plain table.
             close_table()
-            stage = _clean(group["name"])
-            row_number = 0
+            in_final = False
+
+        plain_heading = _PLAIN_HEADING.match(line)
+        group = _GROUP.match(line)
+        if plain_heading is not None or group is not None:
+            close_plain()
+            plain_stage = _clean(group["name"]) if group is not None else stage
             continue
-        if _TABLE_ROW.match(line):
-            if not _HAS_NUMBERS.search(line):
-                # A numbered list of teams ('1.Stationery Stores FC, Lagos;'),
-                # not a table row.
-                continue
-            row_number += 1
-            row = _ROW.match(line)
-            if row is None:
-                problems.append(f"table row not read: {line.strip()}")
-                continue
-            try:
-                current.append(
-                    SourceTableRow(
-                        source="rsssf",
-                        league_code=league_code,
-                        season=season,
-                        stage=stage,
-                        row_number=row_number,
-                        position=int(row["position"]),
-                        team_raw=row["team"],
-                        played=int(row["played"]),
-                        won=int(row["won"]),
-                        drawn=int(row["drawn"]) + int(row["drawn2"] or 0),
-                        lost=int(row["lost"]),
-                        goals_for=int(row["gf"]),
-                        goals_against=int(row["ga"]),
-                        points=int(row["points"]),
-                        note=row["note"],
-                    )
-                )
-            except ValidationError as error:
-                problems.append(
-                    f"table row not valid: {line.strip()}: {error.errors()[0]['msg']}"
-                )
+        if plain_stage is None:
             continue
-        if (
-            _IN_TABLE.match(line)
-            or _OTHER_TABLE.match(line) is None
-            and row_number == 0
-        ):
-            # A blank line, a separator, the next line of a note, or a line
-            # between the heading and the first row (for example 'NB: ...').
+        if _TABLE_ROW.match(line) and _HAS_NUMBERS.search(line):
+            row, problem = _table_row(
+                line, league_code, season, plain_stage, len(plain_rows) + 1
+            )
+            if row is None or problem is not None:
+                plain_read = False
+            else:
+                plain_rows.append(row)
             continue
-        # Any other line ends the final table.
-        close_table()
-        in_final = False
+        if _IN_TABLE.match(line) or (not plain_rows and plain_read):
+            # A blank line, a separator, a next line of a note, or a line
+            # between the heading and the first row.
+            continue
+        close_plain()
     close_table()
+    close_plain()
+
+    for plain_stage_name, (stage_rows, all_read) in candidates.items():
+        if (
+            plain_stage_name not in tables
+            and all_read
+            and _complete_double_round_robin(stage_rows)
+        ):
+            tables[plain_stage_name] = stage_rows
+
     rows = [row for stage_rows in tables.values() for row in stage_rows]
     # A row that is not valid is in the first table and in the copy: report
     # it one time.
     return rows, list(dict.fromkeys(problems))
+
+
+def _table_row(
+    line: str, league_code: str, season: str, stage: str, row_number: int
+) -> tuple[Optional[SourceTableRow], Optional[str]]:
+    """Give the SourceTableRow of a table line, or the problem of the line."""
+    row = _ROW.match(line)
+    if row is None:
+        return None, f"table row not read: {line.strip()}"
+    try:
+        return (
+            SourceTableRow(
+                source="rsssf",
+                league_code=league_code,
+                season=season,
+                stage=stage,
+                row_number=row_number,
+                position=int(row["position"]),
+                team_raw=row["team"],
+                played=int(row["played"]),
+                won=int(row["won"]),
+                drawn=int(row["drawn"]) + int(row["drawn2"] or 0),
+                lost=int(row["lost"]),
+                goals_for=int(row["gf"]),
+                goals_against=int(row["ga"]),
+                points=int(row["points"]),
+                note=row["note"],
+            ),
+            None,
+        )
+    except ValidationError as error:
+        return None, f"table row not valid: {line.strip()}: {error.errors()[0]['msg']}"
+
+
+def _complete_double_round_robin(rows: list[SourceTableRow]) -> bool:
+    """True if each of the n teams (3 or more) played 2(n - 1) matches, and
+    the positions go from 1 to n.
+
+    A plain table with this property is the final table of a double
+    round-robin (decision 26). A table after the first half of such a
+    season has n - 1 matches for each team, thus it does not pass. A single
+    round-robin (n - 1) does not pass either: it looks the same as a table
+    at half-way. The positions find a part of a table: Benin 2017 gives the
+    rows 2, 3 and 6 of a play-off, with 4 matches each.
+    """
+    n = len(rows)
+    return (
+        n >= 3
+        and rows[0].position == 1
+        and rows[-1].position == n
+        and all(row.played == 2 * (n - 1) for row in rows)
+    )
 
 
 def table_check(
