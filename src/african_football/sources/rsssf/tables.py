@@ -83,13 +83,29 @@ _OTHER_TABLE = re.compile(r"^\s*(?:\w+ )*Tables?\b.*:\s*$", re.IGNORECASE)
 
 # 'drawn' can be two numbers: '13  7/ 5  5' (Nigeria 1991 and 1992, when a
 # score draw and a goalless draw gave different points). Then drawn = 7 + 5.
+_POSITION_TEAM = r"^\s*(?P<position>\d+)\.\s*(?P<team>\S(?:.*?\S)?)"
+# The points, with an optional mark for a footnote ('5*'), and the note.
+_POINTS_NOTE = r"\s+(?P<points>-?\d+)(?P<mark>\*)?(?:\s+(?P<note>\S.*?))?\s*$"
 _ROW = re.compile(
-    r"^\s*(?P<position>\d+)\.\s*(?P<team>\S(?:.*?\S)?)"
-    r"\s+(?P<played>\d+)\s+(?P<won>\d+)"
+    _POSITION_TEAM + r"\s+(?P<played>\d+)\s+(?P<won>\d+)"
     r"\s+(?P<drawn>\d+)(?:\s*/\s*(?P<drawn2>\d+))?\s+(?P<lost>\d+)"
-    r"\s+(?P<gf>\d+)\s*-\s*(?P<ga>\d+)\s+(?P<points>-?\d+)"
-    r"(?:\s+(?P<note>\S.*?))?\s*$"
+    r"\s+(?P<gf>\d+)\s*-\s*(?P<ga>\d+)" + _POINTS_NOTE
 )
+
+# Two more forms of a full row (decision 27). The goals in two columns,
+# without '-': ' 1. Cotonsport Garoua  30 19  4  7  41  17  58  Champions'.
+_ROW_GOAL_COLUMNS = re.compile(
+    _POSITION_TEAM + r"\s+(?P<played>\d+)\s+(?P<won>\d+)\s+(?P<drawn>\d+)"
+    r"\s+(?P<lost>\d+)\s+(?P<gf>\d+)\s+(?P<ga>\d+)" + _POINTS_NOTE
+)
+# The points first (Réunion, with 4 points for a win):
+# ' 1.JS St Pierroise   65  22  13  4  5  33- 20'.
+_ROW_POINTS_FIRST = re.compile(
+    _POSITION_TEAM + r"\s+(?P<points>-?\d+)\s+(?P<played>\d+)\s+(?P<won>\d+)"
+    r"\s+(?P<drawn>\d+)\s+(?P<lost>\d+)\s+(?P<gf>\d+)\s*-\s*(?P<ga>\d+)"
+    r"(?P<mark>)(?:\s+(?P<note>\S.*?))?\s*$"
+)
+_ROW_FORMS = (_ROW, _ROW_GOAL_COLUMNS, _ROW_POINTS_FIRST)
 
 # A table row has a number after a space, after the team name. A numbered
 # list of teams ('1.Stationery Stores FC, Lagos;') has none. A team name can
@@ -308,10 +324,17 @@ def parse_tables(
 def _table_row(
     line: str, league_code: str, season: str, stage: str, row_number: int
 ) -> tuple[Optional[SourceTableRow], Optional[str]]:
-    """Give the SourceTableRow of a table line, or the problem of the line."""
-    row = _ROW.match(line)
+    """Give the SourceTableRow of a table line, or the problem of the line.
+
+    The forms are tried in sequence: the main form, the goals in two
+    columns, the points first. The first form that matches is used. The
+    model then checks that won + drawn + lost is played: a row read in a
+    wrong order is a problem, not a row.
+    """
+    row = next((m for m in (form.match(line) for form in _ROW_FORMS) if m), None)
     if row is None:
         return None, f"table row not read: {line.strip()}"
+    note = " ".join(part for part in (row["mark"], row["note"]) if part) or None
     try:
         return (
             SourceTableRow(
@@ -324,12 +347,12 @@ def _table_row(
                 team_raw=row["team"],
                 played=int(row["played"]),
                 won=int(row["won"]),
-                drawn=int(row["drawn"]) + int(row["drawn2"] or 0),
+                drawn=int(row["drawn"]) + int(row.groupdict().get("drawn2") or 0),
                 lost=int(row["lost"]),
                 goals_for=int(row["gf"]),
                 goals_against=int(row["ga"]),
                 points=int(row["points"]),
-                note=row["note"],
+                note=note,
             ),
             None,
         )
