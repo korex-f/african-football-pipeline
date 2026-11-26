@@ -2,6 +2,21 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: Dates on RSSSF pages
+
+**What happened:** The parser takes the years of a season from the page title for its dates, chooses the window of 12 months by a search, reads French and Portuguese month names and dates on group headings, and reports a season of more than 12 months.
+
+**Why it was necessary:** The survey found 703 year-size jumps in 298 seasons. The list of champions gives one year for 375 seasons over two years (`2019` = `Angola 2018/19`), and the first month on a page is not always the first month of the season.
+
+**How the project did it** ([decision 29](docs/decisions/0029-dates.md)): `title_years()`, `_date_window()`, `_month()`, `_ZONE` with group words, and `ParseResult.year_jumps`. The user chose the title for the dates only; the season labels do not change. Module README sections 28 and 29.
+
+**Verification:**
+
+1. **All survey seasons**, compared with `main`: year-size jumps 20 in 18 seasons (703 in 298). Dates outside the years of the page title: 3 (243). Matches with a date: 232,663 (232,195).
+2. **Nigeria, Ghana and Egypt:** 10 seasons with other dates; 21,149 matches with a date (21,099). Nigeria 2001 now starts in November 2000.
+3. 33 new tests, with 3 survey pages as fixtures. 10 deliberate breaks, each caught. Two rules were first tested with made-up data and the survey showed the error: the date with its year (Eritrea 2009) and the lower limit of the problem (Egypt 2019/20).
+
+**Trade-offs:** A season of more than 12 months (Namibia 1997/98, the seasons of 2019/20 that stopped for COVID-19) has dates with a wrong year; 51 seasons show the problem. The season labels stay from the list, thus Angola `2019` has dates from 2018.
 ## November 2026: Season lines in the lists of champions
 
 **What happened:** `parse_index()` reads season lines with a row number or italics before the link, seasons with `-` (`2021-22`), and a heading with a column label before it (`year    <b>PSL</b>`).

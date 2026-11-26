@@ -26,10 +26,12 @@ from african_football.sources.rsssf.http import decode_page
 from african_football.sources.rsssf.parser import (
     Competition,
     ResultRow,
+    _month,
     match_ids,
     parse_lines,
     parse_page,
     split_competitions,
+    title_years,
     to_source_match,
     top_league,
 )
@@ -315,9 +317,27 @@ def test_year_of_a_date(dates, expected):
     assert [r.match_date.year for r in _rows(text)] == expected  # pyright: ignore[reportOptionalMemberAccess]
 
 
-def test_calendar_year_season_has_one_year():
-    rows = _rows("[Dec 30]\nA   1-0 B\n[Jan 2]\nC   1-0 D\n", 2015, 2015)
-    assert [r.match_date for r in rows] == [date(2015, 12, 30), date(2015, 1, 2)]
+@pytest.mark.parametrize(
+    ("dates", "expected"),
+    [
+        # A calendar-year season that ends in January (Namibia 1992).
+        (["[Mar 7]", "[Dec 30]", "[Jan 2]"], [(2015, 3), (2015, 12), (2016, 1)]),
+        # A calendar-year season that starts in December (Burkina Faso 2001):
+        # most dates are in 2015, thus December is in 2014 (decision 29).
+        (["[Dec 23]", "[Jan 5]", "[Mar 1]"], [(2014, 12), (2015, 1), (2015, 3)]),
+        # All dates in one year.
+        (["[Feb 1]", "[Jun 6]", "[Nov 30]"], [(2015, 2), (2015, 6), (2015, 11)]),
+        # A date with its year does not move.
+        (
+            ["[Dec 23]", "[Jan 5]", "[Mar 1]", "[Dec 20, 2015]"],
+            [(2014, 12), (2015, 1), (2015, 3), (2015, 12)],
+        ),
+    ],
+)
+def test_dates_of_a_calendar_year_season(dates, expected):
+    text = "".join(f"{d}\nHome {i}   1-0 Away {i}\n" for i, d in enumerate(dates))
+    rows = _rows(text, 2015, 2015)
+    assert [(r.match_date.year, r.match_date.month) for r in rows] == expected  # pyright: ignore[reportOptionalMemberAccess]
 
 
 def test_round_with_a_date_and_a_round_without():
@@ -768,3 +788,159 @@ def test_scorers_do_not_join_the_note_of_a_result():
         "   Abdel Halim Ali 80]\n"
     )
     assert rows[0].note == "replay;"
+
+
+# ---------------------------------------------------------------------------
+# Dates (decision 29)
+# ---------------------------------------------------------------------------
+
+
+def test_title_years_give_the_dates_of_a_season_over_two_years():
+    # The list of champions gives '2019'; the page title is 'Angola 2018/19'.
+    page = _page("ango2019.html")
+    assert title_years(page) == (2018, 2019)
+    matches, _ = _parse("ango2019.html", 2019, 2019)
+    dates = [m.match_date for m in matches if m.match_date]
+    assert (min(dates), max(dates)) == (date(2018, 10, 27), date(2019, 5, 19))
+
+
+def test_title_years_when_the_list_gives_the_start_year():
+    # The list gives '2014'; the title is 'Chad 2014/15'. Without the title,
+    # most dates (January to June) are in the year of the list.
+    page = (
+        "<title>Chad 2014/15</title>\n<h2>Chad 2014/15</h2>\n<pre>\n"
+        + "".join(
+            f"{d}\nHome {i}   1-0 Away {i}\n"
+            for i, d in enumerate(
+                [
+                    "[Sep 20]",
+                    "[Nov 1]",
+                    "[Feb 7]",
+                    "[Mar 14]",
+                    "[Apr 4]",
+                    "[May 9]",
+                    "[Jun 6]",
+                ]
+            )
+        )
+        + "</pre>"
+    )
+    matches, _ = parse_page(
+        page,
+        league_code="x",
+        season="2014",
+        start_year=2014,
+        end_year=2014,
+        timezone="Africa/Ndjamena",
+        source_url="u",
+        raw_documents=(),
+    )
+    assert [m.match_date.year for m in matches] == [2014, 2014] + [2015] * 5  # pyright: ignore[reportOptionalMemberAccess]
+
+
+def test_date_with_its_year_does_not_move_the_window():
+    # Eritrea 2009. As December dates without a year, the two dates of
+    # 2008 make the window December 2009 to November 2010: [Jan 7] in 2010.
+    rows = _rows(
+        "[Dec 28, 2008]\nA   1-0 B\n[Dec 30, 2008]\nC   1-0 D\n[Jan 7]\nE   1-0 F\n",
+        2009,
+        2009,
+    )
+    assert [r.match_date for r in rows] == [
+        date(2008, 12, 28),
+        date(2008, 12, 30),
+        date(2009, 1, 7),
+    ]
+
+
+def test_calendar_year_season_that_starts_in_december():
+    matches, _ = _parse("burkf01.html", 2001, 2001)
+    years = Counter(m.match_date.year for m in matches if m.match_date)
+    assert years == {2000: 12, 2001: 120}
+    assert min(m.match_date for m in matches if m.match_date) == date(2000, 12, 23)
+
+
+def test_dates_out_of_sequence_stay_in_one_year():
+    # Chad 2008 lists August before July. The first date on the page is not
+    # the start of the season.
+    matches, _ = _parse("tsja08.html", 2008, 2008)
+    dates = [m.match_date for m in matches if m.match_date]
+    assert {d.year for d in dates} == {2008}
+    assert min(dates) == date(2008, 7, 20)
+
+
+def test_date_on_a_group_heading():
+    # Nigeria 2006, round 18: 'Group A [Aug 13]'.
+    league = top_league(_page("nig06.html"))
+    assert league is not None
+    rows = [
+        r for r in parse_lines(league, 2006, 2006).rows if r.round_name == "Round 18"
+    ]
+    assert len(rows) == 11
+    assert None not in {r.match_date for r in rows}
+    assert rows[0].match_date == date(2006, 8, 13)
+
+
+@pytest.mark.parametrize(
+    ("word", "month"),
+    [
+        ("Sep", 9),
+        ("Sept", 9),
+        ("September", 9),
+        ("Mai", 5),
+        ("Maio", 5),
+        ("Févr", 2),
+        ("Fev", 2),
+        ("Avr", 4),
+        ("Abr", 4),
+        ("Juin", 6),
+        ("Juil", 7),
+        ("Juillet", 7),
+        ("Août", 8),
+        ("Ago", 8),
+        ("Set", 9),
+        ("Outubro", 10),
+        ("Déc", 12),
+        ("Dez", 12),
+        ("Round", None),
+        ("Kogi", None),
+    ],
+)
+def test_month_names(word, month):
+    assert _month(word) == month
+
+
+def test_french_and_portuguese_dates():
+    rows = _rows(
+        "[Mai 19]\nA   1-0 B\n[Févr 3]\nC   1-0 D\n[Out 12]\nE   1-0 F\n", 2023, 2024
+    )
+    assert [r.match_date for r in rows] == [
+        date(2024, 5, 19),
+        date(2024, 2, 3),
+        date(2023, 10, 12),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("dates", "years"),
+    [
+        # A season over two years with dates only in January to June: the
+        # second half of the season.
+        (["[Feb 3]", "[Mar 10]", "[Jun 2]"], [2024, 2024, 2024]),
+        # A postponed match listed in its round (a short step back) does not
+        # change the window.
+        (["[Sep 1]", "[Nov 30]", "[Sep 8]", "[Feb 1]"], [2023, 2023, 2023, 2024]),
+    ],
+)
+def test_window_of_a_season_over_two_years(dates, years):
+    text = "".join(f"{d}\nHome {i}   1-0 Away {i}\n" for i, d in enumerate(dates))
+    assert [r.match_date.year for r in _rows(text, 2023, 2024)] == years  # pyright: ignore[reportOptionalMemberAccess]
+
+
+def test_season_longer_than_12_months_is_a_problem():
+    # Egypt 2019/20: the league stopped in March 2020 and started again in
+    # August 2020. The window of 12 months cannot hold it.
+    dates = ["[Sep 20]", "[Dec 1]", "[Mar 10]", "[Aug 8]", "[Sep 12]"]
+    text = "".join(f"{d}\nHome {i}   1-0 Away {i}\n" for i, d in enumerate(dates))
+    parsed = parse_lines(Competition("League", text), 2019, 2020)
+    assert parsed.year_jumps == 1
