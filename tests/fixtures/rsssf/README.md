@@ -77,3 +77,11 @@ These pages come from the survey. Each shows one form of a table heading. `tests
 | `seasons/gha04.html` | https://www.rsssf.org/tablesg/gha04.html | José Batalha and RSSSF | 23 Nov 2006 | `Tables:` with plain group headings (`Zone A`, `Zone B`) |
 | `seasons/nig00.html` | https://www.rsssf.org/tablesn/nig00.html | Eric Boesenberg and RSSSF | 27 Sep 2018 | A plain table with a note in square brackets: `Table [from Nando 7/7/00]:` |
 
+## Season pages for the table row forms (`seasons/`, decision 27)
+
+| File | Page | Authors | Last updated (on the page) | Form that the file shows |
+|---|---|---|---|---|
+| `seasons/kam2012.html` | https://www.rsssf.org/tablesk/kam2012.html | José Batalha and RSSSF | 18 Mar 2021 | Goals in two columns, without `-` |
+| `seasons/reunion99.html` | https://www.rsssf.org/tablesr/reunion99.html | Jacques Lallemand, Hans Schöggl, Ian King and RSSSF | 20 Dec 2007 | The points first (4 points for a win) |
+| `seasons/swaz71.html` | https://www.rsssf.org/tabless/swaz71.html | Neil Morrison and RSSSF | 18 Dec 2014 | A mark after the points (`5*`) |
+

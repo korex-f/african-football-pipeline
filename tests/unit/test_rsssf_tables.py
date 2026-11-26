@@ -414,6 +414,69 @@ def test_final_table_wins_over_a_plain_table():
 
 
 # ---------------------------------------------------------------------------
+# Row forms (decision 27)
+# ---------------------------------------------------------------------------
+
+
+def test_goals_in_two_columns():
+    # ' 1.Union Sportive (Douala)  26 17  4  5  38  17  55  champions'
+    rows, problems = _tables("kam2012.html")
+    assert (len(rows), problems) == (14, [])
+    first = rows[0]
+    assert (first.played, first.goals_for, first.goals_against, first.points) == (
+        26,
+        38,
+        17,
+        55,
+    )
+    [check] = _check("kam2012.html", 2011, 2012)
+    assert check.agrees and check.found_matches == 182
+
+
+def test_points_first():
+    # Réunion, 4 points for a win: ' 1.USS Tamponnaise  86  26  19  3  4  61-26'
+    rows, problems = _tables("reunion99.html")
+    assert (len(rows), problems) == (14, [])
+    first = rows[0]
+    assert (first.points, first.played, first.won, first.goals_for) == (86, 26, 19, 61)
+    [check] = _check("reunion99.html", 1999, 1999)
+    assert check.agrees and check.found_matches == 182
+
+
+def test_mark_after_the_points():
+    # ' 5.Swazi Rail Hawks   10  2  3  5  11-21   5*    ga 0.524'
+    rows, problems = _tables("swaz71.html")
+    assert (len(rows), problems) == (6, [])
+    [row] = [r for r in rows if r.team_raw == "Swazi Rail Hawks"]
+    assert (row.points, row.note) == (5, "* ga 0.524")
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        (
+            " 1.Cotonsport Garoua     30 19   4   7  41  17  58  Champions",
+            (30, 41, 17, 58),
+        ),
+        (" 1.JS St Pierroise       65  22  13  4  5  33- 20", (22, 33, 20, 65)),
+        (" 1.Hearts of Oak         10  7  2  1  20-8  23*", (10, 20, 8, 23)),
+    ],
+)
+def test_row_forms_of_decision_27(line, expected):
+    rows, problems = _page_tables(f"Final Table:\n{line}\n")
+    assert problems == []
+    [row] = rows
+    assert (row.played, row.goals_for, row.goals_against, row.points) == expected
+
+
+def test_row_in_a_wrong_order_is_a_problem():
+    # Seven numbers, but won + drawn + lost is not played in any form.
+    rows, problems = _page_tables("Final Table:\n 1.Kotoko   30 19 4 8 41 17 58\n")
+    assert rows == []
+    assert problems[0].startswith("table row not valid")
+
+
+# ---------------------------------------------------------------------------
 # table_check
 # ---------------------------------------------------------------------------
 

@@ -2,6 +2,21 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: Table row forms on RSSSF pages
+
+**What happened:** The table reader reads two more forms of a full row (goals in two columns, points first) and a mark after the points.
+
+**Why it was necessary:** After decision 26, the survey had 1,180 table rows reported as "not read". About 280 of them are full rows in another order.
+
+**How the project did it** ([decision 27](docs/decisions/0027-table-row-forms.md)): `_ROW_GOAL_COLUMNS`, `_ROW_POINTS_FIRST` and `_ROW_FORMS`, tried in sequence by `_table_row()`. The model refuses a row read in a wrong order. Module README section 26.
+
+**Verification:**
+
+1. **All survey seasons**, compared with `main`: 21,310 table rows (21,079) in 1,468 seasons (1,449). Problems: 975 (1,243). Table checks that agree: 903 (896). No season has fewer rows; no check is worse.
+2. 7 new tests, with 3 survey pages as fixtures. 5 deliberate breaks, each caught.
+
+**Trade-offs:** About 900 short rows (points only, played and points) stay problems: they need a model and database change (the user chose full forms only).
+
 ## November 2026: Final tables on RSSSF pages of all African countries
 
 **What happened:** The table reader accepts more headings of a final table (`Reported Final Table:`, `Final(?) Table:`, `Final Ranking:`, `Official Table ...:`) and the group words `Poule`, `Groupe` and `Grupo`. A plain table (`Table:`, `Reported Table:`, or a group outside a final block) is the final table of its stage if its numbers show a complete double round-robin.

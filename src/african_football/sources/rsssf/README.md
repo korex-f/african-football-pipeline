@@ -313,3 +313,11 @@ The lesson: a test of completeness must be tested on tables that are not complet
 **Why:** `table_check()` (section 16) is a check because the table and the matches come from two records of the season. The author of such a table made it from the results on the same page. Thus it agrees with the results by construction, also when results are missing. A check that cannot fail tells nothing.
 
 **How:** `_PLAIN_HEADING` refuses a note in brackets with `based on`, `known results`, `compiled` or `calculated`. The same question applies to each new data source for verification: is it independent of the data that it checks?
+
+## 26. Try the forms in sequence, and let the model refuse
+
+**What:** `_table_row()` tries three regular expressions in sequence: the main row form, the goals in two columns, and the points first ([decision 27](../../../../docs/decisions/0027-table-row-forms.md)). The first that matches gives the row.
+
+**Why:** A row of numbers does not say which number is which. A wrong order gives a row that looks correct but is wrong. The model `SourceTableRow` checks that won + drawn + lost is played. A row read in a wrong order almost never passes this check, thus it becomes a problem and not a wrong row.
+
+**How:** The forms share their parts (`_POSITION_TEAM`, `_POINTS_NOTE`) and their group names, thus one function makes the row from any of them. The main form is first: a new form can only add rows that the main form did not read. The comparison of all survey seasons confirmed it: no season has fewer rows.
