@@ -329,3 +329,18 @@ The lesson: a test of completeness must be tested on tables that are not complet
 **Why:** A reader with a strict rule gives no problem for a line that it does not read: the line is silently not there. The test of a strict rule is a wide search. The wide search finds too much (links in sentences), but the difference between the two shows each form that the strict rule misses.
 
 **How:** The script put each missed link in a class by the text before the link and by its label. 33 of 2,762 links were missed: 18 with a row number, 3 with `2021-22`, 3 in italics, and some links in sentences. The rules changed only for the real forms. After the change, 11 links are missed, and each has a reason.
+## 28. A heuristic chosen by a search
+
+**What:** `_date_window()` does not compute the window of a season from one sign. It tests all 36 windows (12 first months, 3 first years) and keeps the one with the best score ([decision 29](../../../../docs/decisions/0029-dates.md)).
+
+**Why:** Each single sign failed on some pages. The first month on the page is not always the first month of the season. The longest run of months without a date is sometimes a break in the middle of the season. A score combines what is true for all correct windows: the dates go forward in page sequence, they are in the years of the season, and July to December comes before January to June.
+
+**How:** The score is a tuple: `(jumps back, dates outside, dates in the wrong half, distance to the first month)`. Python compares tuples element by element, thus the first element decides, and the next elements decide only a tie. The last element is the rule before the change: when the data does not decide, the result is the same as before.
+
+## 29. A measure that does not use the rule
+
+**What:** The survey comparison measured the dates with a "year-size jump": two dates in page sequence more than 250 days apart.
+
+**Why:** The first measure was "dates outside the years of the season". The old rule could never put a date outside these years, thus the measure was 30 for all wrong years. A measure must be able to see the error of the rule that it measures. A wrong year makes a date jump about one year back or forward from its neighbours, with any rule.
+
+**How:** Each change was measured with this jump count and with the dates outside the years of the page title. The window score also uses jumps, but only back: the measure counts both directions. Thus the measure is not the score.

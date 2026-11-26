@@ -34,3 +34,4 @@ Each file is one decision. A decision file is not deleted. If the project change
 | 26 | [Final tables on RSSSF pages of all African countries: more heading words, and complete plain tables](0026-table-headings.md) |
 | 27 | [Table rows on RSSSF pages: two more full forms, and short forms stay problems](0027-table-row-forms.md) |
 | 28 | [Lists of champions on RSSSF: more season-line forms](0028-index-line-forms.md) |
+| 29 | [Dates on RSSSF pages: the years from the page title, a tested window, and more month names](0029-dates.md) |
