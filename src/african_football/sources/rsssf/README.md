@@ -291,3 +291,25 @@ The old "match" was `abandoned at` 1-0 `in 72'`. The real match had a score of 1
 | `award may have been revoked` | not certain |
 
 **How:** The rule became narrower. The word must be next to the award (`award of 3-0 revoked`), or at the start of a part of the note (`; later annulled`, `- annulled`, `but later annulled`). A `?` after the word means that it is not certain. Each line of the table above is a test. The lesson: for a rule with words, read all its matches on the data, not only the examples that made the rule.
+## 24. A table that tests itself
+
+**What:** A plain table (`Table:`) is the final table of its stage only if its own numbers show a complete season: n teams (3 or more), positions 1 to n, and 2(n − 1) matches for each team ([decision 26](../../../../docs/decisions/0026-table-headings.md)).
+
+**Why:** A heading does not always tell if a table is final. `Table:` is the final table of Ghana 1999, and the table after round 15 of many other seasons. The numbers in the rows can tell it: at the end of a double round-robin, each team has played each other team two times.
+
+**How:** `_complete_double_round_robin()`. The comparison of all survey seasons made the test stricter two times:
+
+| Test | What the survey showed | Correction |
+|---|---|---|
+| n − 1 or 2(n − 1) matches | 31 interim tables passed: after half of a double round-robin, each team has n − 1 matches | 2(n − 1) only |
+| 2(n − 1) matches, 3 or more teams | Benin 2017: rows 2, 3 and 6 of a play-off group, 4 matches each, passed by chance | positions 1 to n |
+
+The lesson: a test of completeness must be tested on tables that are not complete. Here the interim tables and the part of a table were the test data.
+
+## 25. A table made from the results is not a check
+
+**What:** `Table (based on known results):` is never a final table.
+
+**Why:** `table_check()` (section 16) is a check because the table and the matches come from two records of the season. The author of such a table made it from the results on the same page. Thus it agrees with the results by construction, also when results are missing. A check that cannot fail tells nothing.
+
+**How:** `_PLAIN_HEADING` refuses a note in brackets with `based on`, `known results`, `compiled` or `calculated`. The same question applies to each new data source for verification: is it independent of the data that it checks?

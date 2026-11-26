@@ -314,7 +314,7 @@ At the end of each step, the pipeline works.
 | 1 | Repair the Soccerway scraper with stable selectors and saved-page fixtures | ✅ Done |
 | 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | ✅ Done |
 | 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | ✅ Done |
-| 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | In progress: parts 1 to 3 of 4 done (discovery, fetch, parser, final tables); fixes from the Africa survey: 2 of 5 done (the league choice, the result lines) |
+| 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | In progress: parts 1 to 3 of 4 done (discovery, fetch, parser, final tables); fixes from the Africa survey: 3 of 5 done (the league choice, the result lines, the table headings) |
 | 5 | Add reconciliation between sources, validation rules, and season statuses | Planned |
 | 6 | Add the Source Manager with fallback and resume. The Airflow DAG calls the library. | Planned |
 | 7 | Add more leagues from RSSSF, and federation and league sites | Later |

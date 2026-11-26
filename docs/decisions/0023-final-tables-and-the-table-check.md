@@ -1,6 +1,6 @@
 # 23. Final tables are stored, and a table check compares them with the matches
 
-*Status: accepted (November 2026). [All decisions](README.md)*
+*Status: accepted (November 2026). The rule "which tables" is changed by [decision 26](0026-table-headings.md): more heading words, and complete plain tables. [All decisions](README.md)*
 
 - **What:** `sources/rsssf/tables.py` reads the final tables of the top league from RSSSF season pages. Each row is a `SourceTableRow` (`models/source_table.py`). The loader writes the rows to the new table `source_tables` (migration `002_source_tables.sql`). `table_check()` compares a table with the matches of its stage.
 - **Why:** [Decision 7](0007-testable-definition-of-verified.md) gives two conditions for a verified season. The second is "an independent source agrees, **or** the total goals agree with a final table". A final table is a second record of the season, made by its author from the full results. If the matches that the pipeline has agree with it, the season is very probably complete and correctly read.

@@ -65,4 +65,15 @@ These pages also come from the survey. Each shows one form of a result line, or 
 | `seasons/gha2010.html` | https://www.rsssf.org/tablesg/gha2010.html | José Batalha and RSSSF | 5 Jan 2011 | A team name in lower case (`kotoko`) |
 | `seasons/kam2015.html` | https://www.rsssf.org/tablesk/kam2015.html | José Batalha and RSSSF | 18 Mar 2021 | Scores in a note (`[awarded 3-0; originally 1-1, ...]`) |
 | `seasons/oeg97.html` | https://www.rsssf.org/tableso/oeg97.html | Mikael Jönsson and RSSSF | 27 Aug 2010 | A result word in upper case (`Ppd`) |
+## Season pages for the table headings (`seasons/`, decision 26)
+
+These pages come from the survey. Each shows one form of a table heading. `tests/unit/test_rsssf_tables.py` reads them.
+
+| File | Page | Authors | Last updated (on the page) | Form that the file shows |
+|---|---|---|---|---|
+| `seasons/gha62.html` | https://www.rsssf.org/tablesg/gha62.html | Hans Schöggl and RSSSF | 13 Dec 2018 | A word before `Final`: `Reported Final Table:` |
+| `seasons/gha03.html` | https://www.rsssf.org/tablesg/gha03.html | José Batalha, Hans Schöggl and RSSSF | 9 Jul 2009 | A note in brackets: `Final(?) Table:` |
+| `seasons/gha99.html` | https://www.rsssf.org/tablesg/gha99.html | José Batalha and RSSSF | 9 Jul 2009 | A complete plain `Table:` (16 teams, 30 matches each) |
+| `seasons/gha04.html` | https://www.rsssf.org/tablesg/gha04.html | José Batalha and RSSSF | 23 Nov 2006 | `Tables:` with plain group headings (`Zone A`, `Zone B`) |
+| `seasons/nig00.html` | https://www.rsssf.org/tablesn/nig00.html | Eric Boesenberg and RSSSF | 27 Sep 2018 | A plain table with a note in square brackets: `Table [from Nando 7/7/00]:` |
 

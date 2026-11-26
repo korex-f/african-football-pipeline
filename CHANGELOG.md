@@ -2,6 +2,30 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: Final tables on RSSSF pages of all African countries
+
+**What happened:** The table reader accepts more headings of a final table (`Reported Final Table:`, `Final(?) Table:`, `Final Ranking:`, `Official Table ...:`) and the group words `Poule`, `Groupe` and `Grupo`. A plain table (`Table:`, `Reported Table:`, or a group outside a final block) is the final table of its stage if its numbers show a complete double round-robin.
+
+**Why it was necessary:** The survey of 56 countries found 500 seasons with a table that the reader did not read. Decision 24 corrected the largest cause. The other causes were the headings.
+
+**How the project did it** ([decision 26](docs/decisions/0026-table-headings.md)):
+
+- `_FINAL_HEADING`: up to 3 words before `Final`, a note in brackets, `Ranking`, `Standings`, `Official Table`. Not `Top ...`. A heading ends with `:`.
+- `_PLAIN_HEADING` and the last plain table of each stage as a candidate. `_complete_double_round_robin()`: 3 or more teams, positions 1 to n, 2(n − 1) matches for each team. Not a table "based on known results".
+- `_table_row()`: one function for a table row, for final and plain tables.
+- The techniques are in the [module README](src/african_football/sources/rsssf/README.md), sections 24 and 25.
+
+**Verification:**
+
+1. **All survey seasons**, compared with `main`: 21,079 table rows (19,622 before) in 1,449 seasons (1,373). Table checks that agree: 896 (870). No season has fewer rows. One check that agreed does not agree now (Namibia 1993): it shows a wrong league choice (decision 26).
+2. **Nigeria, Ghana and Egypt:** 2,481 table rows (2,305). Table checks that agree: 59 (57). Ghana 1999 and Ghana 2003 now agree with all 240 matches.
+3. 30 new tests, with 5 pages of Ghana and Nigeria as fixtures. 1 page test has a new number (Niger 2003: two groups, `Poule A` and `Poule B`).
+4. 18 deliberate breaks, each caught. One rule (`Final table missing`) did nothing that the heading form does not do: the survey has no such heading with `:`. It was removed.
+
+**Trade-offs:**
+
+- A single round-robin league with only a plain `Table:` has no table: it looks the same as a table at half-way.
+- About 1,000 table rows in 108 seasons have another row form (points only, goals without `-`). They are reported, and they are the next fix.
 ## November 2026: Result lines on RSSSF pages of all African countries
 
 **What happened:** The RSSSF parser reads more forms of result lines, and new guards stop lines that are not results. A note that continues on the next lines is now complete. An award that the note revokes does not count.
