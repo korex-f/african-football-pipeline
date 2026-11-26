@@ -43,7 +43,7 @@ year.
 
 import html
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Optional
 
@@ -188,8 +188,13 @@ _PLAYOFF_STAGE = re.compile(
 # A zone heading in a round: Zone 1 [Oct 1]
 _ZONE = re.compile(rf"^\s*(?P<name>Zone \w+)\s*(?:{_DATE})?\s*$", re.IGNORECASE)
 
-_RESULT_WORDS = "awd|abd|w/o|unk|bt|lt|drw"
-_SCORE = r"\d{1,2}-\d{1,2}"
+# The result words (decision 25): awarded, abandoned, walkover, unknown,
+# beat, lost to, draw, tie (a draw), not played, postponed, annulled, and
+# '---' (no result), in upper or lower case ('W/o', 'Ppd'). 'bye', 'vs' and
+# 'draw' (in sentences) are not results.
+_RESULT_WORDS = "awd|abd|w/o|unk|bt|lt|drw|tie|n/p|ppd|ann|---"
+# A score; '3-0*' (a mark); '?-?', '3-?' (a score that is not known).
+_SCORE = r"\d{1,2}-\d{1,2}\*?|\?-\?|\d{1,2}-\?|\?-\d{1,2}"
 
 # After the away team: two spaces, a tab, or one space and '[', then the
 # rest of the line. The rest is a note, or the next part of an open note.
@@ -197,11 +202,27 @@ _RESULT_LINE = re.compile(
     r"^(?P<home>\S(?:.*?\S)?)[ \t]+"
     rf"(?P<result>{_SCORE}|{_RESULT_WORDS})"
     r"[ \t]+(?P<away>[^\s\[](?:(?! {2}|\t).)*?[^\s\[]|[^\s\[])"
-    r"(?:(?:[ \t]{2,}|\t|[ \t]+(?=\[))(?P<rest>.*?))?[ \t]*$"
+    r"(?:(?:[ \t]{2,}|\t|[ \t]+(?=\[))(?P<rest>.*?))?[ \t]*$",
+    re.IGNORECASE,
 )
 
 # A line that looks like a result: a word, a result, a word.
-_LOOKS_LIKE_RESULT = re.compile(rf"\S[ \t]+(?:{_SCORE}|{_RESULT_WORDS})[ \t]+\S")
+_LOOKS_LIKE_RESULT = re.compile(
+    rf"\S[ \t]+(?:{_SCORE}|{_RESULT_WORDS})[ \t]+\S", re.IGNORECASE
+)
+
+# Teams first, then the score: 'Al-Menya - Al-Ahly   1-3',
+# 'FC HellBourg. - US Ste Anne : 6-1'. A fixture without a score
+# ('MC Alger   -  Paradou AC') is not a result.
+_TEAMS_FIRST = re.compile(
+    r"^(?P<home>\S(?:.*?\S)?)[ \t]+-[ \t]+(?P<away>\S(?:.*?\S)?)"
+    r"[ \t]*:?[ \t]+(?P<result>\d{1,2}-\d{1,2})(?:[ \t]+(?P<rest>.*?))?[ \t]*$"
+)
+
+# A heading with numbers, not a result: 'Rounds 6-9 missing', 'Round 19
+# [postponed from Mar 2-4 ...]', 'Table (based on known results w/o ...)'.
+# The parser does not report these lines as 'not read'.
+_NOT_A_TEAM = re.compile(r"^(?:rounds?|tables?|results?|matches)\b", re.IGNORECASE)
 
 _TABLE_ROW = re.compile(r"^\s*\d+\.\s*\S")
 _FINAL_TABLE = re.compile(r"^\s*Final Table", re.IGNORECASE)
@@ -221,6 +242,19 @@ _SCORES = re.compile(r"(?<![\d-])\d{1,2}-\d{1,2}(?![\d-])")
 _PENALTIES = re.compile(r"(?P<home>\d+)-(?P<away>\d+) ?pen")
 _AWARDED = re.compile(
     r"awarded (?P<h1>\d+)-(?P<a1>\d+)|(?P<h2>\d+)-(?P<a2>\d+) awarded", re.IGNORECASE
+)
+# An award that the note revokes (decision 25). Two forms:
+# - the award and the word together: 'award of 3-0 revoked', 'award revoked';
+# - the word at the start of a part of the note, after ';', ',', '-' or
+#   'but': '[awarded 3-0; ...; decision revoked on appeal]', '[awarded 2-0;
+#   later annulled]', '[awarded 2-0 - annulled]'.
+# Not: 'annulled; 0-3 awarded' (the old result is annulled), 'a penalty
+# award to Karonga was revoked', 'that decision was revoked', and a word
+# that is not certain: 'to be annulled?', 'award revoked?'.
+_AWARD_REVOKED = re.compile(
+    r"\baward(?:ed)?(?: of \d+-\d+)? (?:was )?(?:revoked|annulled)\b(?!\?)"
+    r"|(?:[;,\-–]|\bbut) *(?:later |then )?(?:decision )?(?:revoked|annulled)\b(?!\?)",
+    re.IGNORECASE,
 )
 _TAG = re.compile(r"<[^>]+>")
 _SPACES = re.compile(r"\s+")
@@ -253,7 +287,8 @@ class ResultRow:
             'bt' (the home team won, no score), 'lt' (the home team lost)
             or 'drw' (a draw, no score).
     note:   the note of the line, or None. A note in [ ] that continues on
-            the next lines has only its first part here.
+            the next lines has all its parts here, with one space between
+            them (decision 25).
     """
 
     stage: str
@@ -275,11 +310,75 @@ class ParseResult:
     # Lines with two or more scores: rows of a results grid or a crosstable.
     # The parser does not read this form.
     grid_lines: int = 0
+    # Lines of a two-leg tie ('A  1-0 3-2  B'). The order of the second leg
+    # is not certain from the line, thus the parser does not read them.
+    two_leg_lines: int = 0
 
 
 # ---------------------------------------------------------------------------
 # Steps 1 and 2: the competitions, and the top league
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _ResultParts:
+    home: str
+    result: str
+    away: str
+    rest: str
+
+
+def _result_parts(line: str) -> Optional[_ResultParts]:
+    """Give the parts of a result line, or None (decision 25).
+
+    Two forms: 'Home  2-1 Away  [note]' and 'Home - Away  2-1'. A line is
+    not a result line if:
+    - it is a table row, or a row of a results grid (3 or more scores, or
+      the diagonal mark 'xxx');
+    - the away team starts with a second score: a line of a two-leg tie
+      ('Etoile du Congo  11-0 5-0 Racing Club Oualembo');
+    - a team has ':' (a label) or has no letter;
+    - a team starts in lower case and only one space is before the score:
+      a part of a sentence ('abandoned at 1-0 in 72'). Some pages have
+      team names in lower case, with a wide gap ('kotoko      2-0 Hearts');
+    - the score is in a note: '[' is open in the home team, or ']' closes
+      in the away team ('[award of 3-0 revoked]').
+    """
+    if _TABLE_ROW.match(line) or _is_grid_row(line):
+        return None
+    match = _RESULT_LINE.match(line) or _TEAMS_FIRST.match(line)
+    if match is None:
+        return None
+    home, away = match["home"].strip(), match["away"].strip()
+    if _SCORES.match(away) or ":" in home:
+        return None
+    one_space = line[match.end("home") : match.start("result")] == " "
+    for team in (home, away):
+        if _LETTER.search(team) is None or (one_space and team[:1].islower()):
+            return None
+    if home.count("[") > home.count("]") or away.count("]") > away.count("["):
+        return None
+    return _ResultParts(
+        home, match["result"].lower(), away, (match["rest"] or "").strip()
+    )
+
+
+def _is_grid_row(line: str) -> bool:
+    """True for a row of a results grid: 3 or more scores, or 'xxx'.
+
+    The parser does not count the scores in a note: 'Fovu  1-1 Canon
+    [awarded 3-0; originally 1-1]' is a result line.
+    """
+    text = line.split("[", 1)[0]
+    return len(_SCORES.findall(text)) >= 3 or re.search(r"\bxxx\b", text) is not None
+
+
+def _is_two_leg(line: str) -> bool:
+    """True for a line of a two-leg tie: a team, two scores, a team."""
+    return (
+        re.search(rf"\S[ \t]+(?:{_SCORE})[ \t]+(?:{_SCORE})[ \t]+[^\W\d_]", line)
+        is not None
+    )
 
 
 def _is_result(line: str) -> bool:
@@ -292,15 +391,7 @@ def _is_result(line: str) -> bool:
     letter: in 'Zamalek  0-0 2-2' (the two results of one team against
     Zamalek), '2-2' is not a team.
     """
-    if _TABLE_ROW.match(line):
-        return False
-    match = _RESULT_LINE.match(line)
-    return (
-        match is not None
-        and ":" not in match["home"]
-        and _LETTER.search(match["home"]) is not None
-        and _LETTER.search(match["away"]) is not None
-    )
+    return _result_parts(line) is not None
 
 
 def split_competitions(page: str) -> list[Competition]:
@@ -348,7 +439,13 @@ def split_one_block(text: str, first_name: str) -> list[Competition]:
         next_line = _clean_line(lines[i + 1]) if i + 1 < len(lines) else ""
         if _UNDERLINE.match(line):
             continue
-        if line.strip() and _UNDERLINE.match(next_line):
+        # A numbered round with a line of '=' under it ('Round 1') is a
+        # part of the league, not a new competition (decision 25).
+        if (
+            line.strip()
+            and _UNDERLINE.match(next_line)
+            and not _is_numbered_round(line)
+        ):
             close(_clean(line))
             continue
         if (
@@ -379,11 +476,16 @@ def split_one_block(text: str, first_name: str) -> list[Competition]:
     return competitions
 
 
+def _is_numbered_round(line: str) -> bool:
+    """True for a round heading with a number ('Round 12')."""
+    round_match = _ROUND.match(line)
+    return round_match is not None and round_match["number"] is not None
+
+
 def _continues_league(line: str) -> bool:
     """True for a numbered round, a date or a result line."""
-    round_match = _ROUND.match(line)
     return (
-        (round_match is not None and round_match["number"] is not None)
+        _is_numbered_round(line)
         or _DATE_LINE.match(line) is not None
         or _is_result(line)
     )
@@ -623,6 +725,21 @@ def parse_lines(
     current_date: Optional[date] = None
     first_month: Optional[int] = None
     open_note = False
+    # The index in result.rows of the row whose note is open, or None (an
+    # open list of scorers, or no open note).
+    note_row: Optional[int] = None
+
+    def continue_note(text: str) -> None:
+        """Add the next part of an open note to the note of its row."""
+        nonlocal open_note, note_row
+        part = text.split("]", 1)[0].strip()
+        if note_row is not None and part:
+            row = result.rows[note_row]
+            note = f"{row.note} {part}" if row.note else part
+            result.rows[note_row] = replace(row, note=note)
+        if "]" in text:
+            open_note = False
+            note_row = None
 
     def to_date(match: re.Match[str]) -> Optional[date]:
         nonlocal first_month
@@ -649,6 +766,7 @@ def parse_lines(
             round_name = round_number = None
             current_date = None
             open_note = False
+            note_row = None
             continue
 
         line = _clean_line(raw_line)
@@ -660,8 +778,9 @@ def parse_lines(
         if line[0] in (" ", "\t"):
             if "[" in line:
                 open_note = "]" not in line[line.rindex("[") :]
-            elif "]" in line:
-                open_note = False
+                note_row = None
+            elif open_note:
+                continue_note(line)
             continue
         if _TABLE_ROW.match(line) or line.startswith(("NB", "-", "(")):
             continue
@@ -671,6 +790,7 @@ def parse_lines(
             # A note at the start of a line, for example
             # '[*14] w/o goals rd 14 (Liberty bt Goldfields by 1)'.
             open_note = "]" not in line
+            note_row = None
             continue
         if date_match is not None:
             current_date = to_date(date_match)
@@ -700,34 +820,50 @@ def parse_lines(
                 current_date = to_date(zone)
             continue
 
-        row = _RESULT_LINE.match(line) if _is_result(line) else None
+        row = _result_parts(line)
+        if row is None and open_note and note_row is not None and date_match:
+            # The next part of the note of a row, in a column after a date:
+            # '[Aug 15]                    abandoned at 1-0 in 72''. Only
+            # after a date: if a page does not close a note, the other
+            # lines must not disappear into the note.
+            continue_note(line)
+            continue
         if row is None:
-            if len(_SCORES.findall(line)) >= 2:
+            # A grid row first: a grid row also has two scores and a team.
+            if _is_grid_row(line):
                 result.grid_lines += 1
-            elif _LOOKS_LIKE_RESULT.search(line):
+            elif _is_two_leg(line):
+                result.two_leg_lines += 1
+            elif len(_SCORES.findall(line)) >= 2:
+                result.grid_lines += 1
+            # A heading with numbers ('Rounds 6-9 missing') is not a result.
+            elif _LOOKS_LIKE_RESULT.search(line) and not _NOT_A_TEAM.match(
+                line.strip()
+            ):
                 result.unparsed.append(line.strip())
             elif "]" in line:
                 open_note = False
             continue
 
-        rest = (row["rest"] or "").strip()
+        rest = row.rest
         note: Optional[str] = None
         if open_note:
-            # The rest is the next part of an open note.
-            if "]" in rest:
-                open_note = False
+            # The rest is the next part of an open note, in a column at the
+            # right of this result line.
+            continue_note(rest)
         elif rest.startswith("["):
             note = rest[1:].split("]", 1)[0].strip()
             open_note = "]" not in rest
+            note_row = len(result.rows) if open_note else None
         result.rows.append(
             ResultRow(
                 stage=stage,
                 round_name=round_name,
                 round_number=round_number,
                 match_date=current_date,
-                home=row["home"].strip(),
-                away=row["away"].strip(),
-                result=row["result"],
+                home=row.home,
+                away=row.away,
+                result=row.result,
                 note=note or None,
             )
         )
@@ -756,14 +892,17 @@ def to_source_match(
     """
     home_goals = away_goals = pen_home = pen_away = None
     note = row.note or ""
-    if re.fullmatch(_SCORE, row.result):
+    if re.fullmatch(r"\d{1,2}-\d{1,2}\*?", row.result):
         status = MatchStatus.PLAYED
-        home_goals, away_goals = (int(x) for x in row.result.split("-"))
+        home_goals, away_goals = (int(x) for x in row.result.rstrip("*").split("-"))
         penalties = _PENALTIES.search(note)
         # A note can name a penalty in a match without a shootout, for
         # example '1-0 [Masry scored a pen]'. A shootout needs a draw.
         if penalties is not None and home_goals == away_goals:
             pen_home, pen_away = int(penalties["home"]), int(penalties["away"])
+    elif row.result == "awd" and _AWARD_REVOKED.search(note):
+        # '[awarded 2-0; later annulled]': the award does not count.
+        status = MatchStatus.CANCELLED
     elif row.result == "awd":
         status = MatchStatus.AWARDED
         awarded = _AWARDED.search(note)
@@ -774,8 +913,23 @@ def to_source_match(
         status = MatchStatus.AWARDED
     elif row.result == "abd":
         status = MatchStatus.ABANDONED
+    elif row.result == "ann":
+        # Annulled: the match does not count (it is replayed later).
+        status = MatchStatus.CANCELLED
+    elif row.result == "n/p":
+        # Not played. 'n/p  [awarded 2-0]' is an awarded match.
+        awarded = _AWARDED.search(note)
+        if awarded is not None and not _AWARD_REVOKED.search(note):
+            status = MatchStatus.AWARDED
+            home_goals = int(awarded["h1"] or awarded["h2"])
+            away_goals = int(awarded["a1"] or awarded["a2"])
+        else:
+            status = MatchStatus.CANCELLED
+    elif row.result == "ppd":
+        status = MatchStatus.POSTPONED
     else:
-        # unk, bt, lt, drw: the source does not give a score.
+        # unk, bt, lt, drw, tie, ---, '3-?', '?-?': the source does not
+        # give a score.
         status = MatchStatus.UNKNOWN
 
     return SourceMatch(
@@ -864,6 +1018,8 @@ def parse_page(
         problems.append(
             f"{parsed.grid_lines} lines of a results grid or crosstable not read"
         )
+    if parsed.two_leg_lines:
+        problems.append(f"{parsed.two_leg_lines} lines of two-leg ties not read")
     matches = []
     for row, match_id in zip(parsed.rows, match_ids(parsed.rows, league_code, season)):
         try:
@@ -889,8 +1045,15 @@ def _clean(text: str) -> str:
 
 
 def _clean_line(line: str) -> str:
-    """Remove the HTML tags of a line, and keep its spaces and tabs."""
-    return html.unescape(_TAG.sub("", line)).rstrip()
+    """Remove the HTML tags of a line, and keep its spaces and tabs.
+
+    A score with an en dash or an em dash ('1–1') gets a hyphen ('1-1'). A
+    score with a mark and no space after it ('3-0*CRE Constantine') gets a
+    space after the mark (decision 25).
+    """
+    text = html.unescape(_TAG.sub("", line)).rstrip()
+    text = re.sub(r"(?<=\d)[–—−](?=\d)", "-", text)
+    return re.sub(r"(\d-\d{1,2}\*)(?=\S)", r"\1 ", text)
 
 
 _VOCABULARY = _vocabulary_pattern()

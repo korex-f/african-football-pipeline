@@ -2,6 +2,36 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: Result lines on RSSSF pages of all African countries
+
+**What happened:** The RSSSF parser reads more forms of result lines, and new guards stop lines that are not results. A note that continues on the next lines is now complete. An award that the note revokes does not count.
+
+**Why it was necessary:** The survey of 56 countries (the entry below) showed result lines that the parser did not read, for example scores with an en dash (`1–1`): Algeria 1972/73 gave 1 match of 248. It also showed lines that the parser read as matches but that are not matches: rows of a results grid, two-leg ties, and parts of sentences and notes. Both errors were silent.
+
+**How the project did it** ([decision 25](docs/decisions/0025-result-line-forms.md)):
+
+- New forms: en and em dashes, `3-0*`, `3-?`, `?-?`, teams first (`COD Meknes  - SA Sale  5-2`), and the words `tie`, `---`, `ppd`, `ann`, `n/p`, in upper or lower case. `ppd` is POSTPONED; `ann` and `n/p` are CANCELLED, or AWARDED if the note gives an award.
+- New guards: grid rows (3 scores or `xxx` before the note), two-leg lines (reported as a problem), parts of sentences (a lower-case team with one space before the score), and scores in a note.
+- A numbered round with a line of `=` under it is a part of the league.
+- `_result_parts()`: one function for "is this a result line" and its parts.
+- The next parts of a note join the note of their row (`note_row` in `parse_lines()`). `_AWARD_REVOKED` finds an award that the note revokes.
+- The techniques are in the [module README](src/african_football/sources/rsssf/README.md), sections 11, 14 and 21 to 23.
+
+**Verification:**
+
+1. **All 2,446 survey seasons**, compared with `main`: 237,900 matches (235,078 before). Table checks that agree: 870 of 1,500 (837 before). 349 seasons have more matches; 52 have fewer, and each lost row was a wrong read. 3 seasons agreed with their table before and do not agree now: in each, a wrong read gave the correct sum by chance (decision 25).
+2. **Nigeria, Ghana and Egypt:** 21,256 matches (21,201 before). Table checks that agree: 57 (53 before). Egypt 2004/05 now has its 26 rounds of 7 matches.
+3. 31 new tests, with 9 survey pages as fixtures (their authors are in `tests/fixtures/rsssf/README.md`). 6 page tests have new numbers, each checked against the lines that it added: for example `ppd` and `n/p` lines.
+4. 28 deliberate breaks, each caught. Two rules that no test could prove were measured on all seasons: one changed nothing and was removed; the other changed one season, and its line became the test.
+
+**Trade-offs:**
+
+- Two-leg lines are not read. The problems show them.
+- The revocation rule reads English words only.
+- An abandoned match whose result stood has no score. The table check shows these seasons.
+- São Tomé 1999 now gives an island league (1 match) and not the national final (1 match). `rsssf_league` corrects it when the project adds São Tomé.
+- The other findings of the survey (table headings, the index, dates) come in their own changes. The dates of a round with the date on a group heading (`Group A [Aug 13]`) are one of them.
+
 ## November 2026: The national league on RSSSF pages of all African countries
 
 **What happened:** The RSSSF parser and the table reader choose the national league of a page with new rules (`choose_league()`), not with "the first competition with results". `leagues.yaml` can correct a league (`rsssf_league`). The log shows each choice, its reason and the other competitions.

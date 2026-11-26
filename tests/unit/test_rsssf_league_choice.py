@@ -263,10 +263,12 @@ def test_sentence_is_not_a_heading():
         ("maro2012.html", 2011, 2012, "GNF I", "tables only", 0, 16),
         ("egy2011.html", 2010, 2011, "First Level", "tables only", 0, 16),
         ("tun2026.html", 2025, 2026, "Ligue Professionnelle 1", "tables only", 0, 16),
-        # The first stage (179 matches), not the final stage 'Super League'.
-        ("nig06.html", 2006, 2006, "First Stage", "first league", 179, 20),
-        # 'Group A' (4 matches), then 'National Premier League' (36).
-        ("sier01.html", 2001, 2001, "National Premier League", "national name", 36, 10),
+        # The first stage (181 matches, 2 of them awarded), not the final
+        # stage 'Super League'.
+        ("nig06.html", 2006, 2006, "First Stage", "first league", 181, 20),
+        # 'Group A' (4 matches), then 'National Premier League' (43, 7 of
+        # them with no result: '---').
+        ("sier01.html", 2001, 2001, "National Premier League", "national name", 43, 10),
         # A French name in lower case is not a sentence.
         (
             "niger03.html",
@@ -297,7 +299,8 @@ def test_sentence_is_not_a_heading():
             6,
             0,
         ),
-        ("reunion2022.html", 2022, 2022, "Régional 1", "first league", 183, 14),
+        # 183 played matches and 1 not played ('n/p').
+        ("reunion2022.html", 2022, 2022, "Régional 1", "first league", 184, 14),
     ],
 )
 def test_survey_page(page, start, end, league, reason, matches, rows):

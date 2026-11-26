@@ -150,6 +150,10 @@ The first parser skipped all the lines of an open note, thus it lost two matches
 
 The regular expression for the away team: `[^\s\[](?:(?! {2}|\t).)*?[^\s\[]`. `(?! {2}|\t)` is a *negative lookahead*: each character of the name must not be the start of two spaces or a tab. Thus a name can have single spaces (`Sporting Lagos`) but stops at the column gap.
 
+Since [decision 25](../../../../docs/decisions/0025-result-line-forms.md), the parser also keeps the text of the next parts. The state has the index of the row whose note is open (`note_row`). Each next part goes to the note of that row: at the right of a result, at the right of a date, or on an indented line. A list of scorers (`  [Tamer Abdel Hamid 47, ...`) opens a note too, but sets `note_row` to `None`: its text is not a part of the note of a result.
+
+A next part on a line without a date or a result is joined only after a date. The reason: if a page does not close a note with `]`, a wider rule puts all the next lines into the note, also the lines that the report must show.
+
 ## 12. Layered defences, and how to test each layer
 
 Three rules stop a table row from being a result line:
@@ -181,6 +185,7 @@ The parser does not stop at a line that it cannot read, and it does not ignore t
 - `not read: Sportnet  4-0  [?]`: a line that looks like a result (a word, a result, a word) but does not have the known form.
 - `not valid: Masry 1-0 ZED: ...`: a row that is not a valid `SourceMatch`.
 - `16 lines of a results grid or crosstable not read`: one problem for each page, not one for each line.
+- `5 lines of two-leg ties not read` (decision 25): `A  2-0  1-5 B` does not show the home team of the second leg.
 - `no season part for the anchor #99`.
 
 A page with only a results grid gives a problem. Thus it does not look the same as a page without results. The adapter puts the problems in `RsssfAdapter.problems` and in the log.
@@ -248,3 +253,41 @@ The lesson: for rules with words, a test of one page shows that a rule works. A 
 The rules use English, French and Portuguese words: `Coupe|Copa|Ta[çc]a`, `deuxi[eè]me|2[eè]me`, `divis[aã]o`. Character classes (`[çc]`, `[eè]`) accept a word with or without its accent, because some pages write `Taca` and some `Taça`. `re.IGNORECASE` also works for these letters in Python 3.
 
 The words of all the rules together are one pattern, `_VOCABULARY`. The note rule uses it: a name in lower case ('Championnat national de première division') is not a sentence, because its lower-case words are league words. `_VOCABULARY` is made at the end of the module, after all the patterns that it joins.
+
+## 21. A rule that changes nothing
+
+**What:** A rule that a comparison of all the data shows to change nothing is removed.
+
+**Why:** Section 12 shows that layered defences can hide a rule from the tests. Decision 25 found the other case. The rule "a team is not a word of text (`Round`, `Table`)" did not fail any test after a deliberate break. The comparison of all 2,446 survey seasons, with and without the rule, showed 0 changes. The lower-case guard and the note guard stop the same lines. A rule that does nothing is a cost: a reader must understand it, and a later change must keep it correct.
+
+**How:** For each rule that no test can prove, run the comparison without it. 0 changes: remove the rule. A change: the change shows the real line for a test. The note guard (`[` open in the home team) changed one season, Tunisia 1995/96. Its line (`13 CS Hammam Lif  26 ... [0 1 1 2-3 1] Relegated`) is now the test of that rule.
+
+## 22. A correct sum for a wrong reason
+
+**What:** With decision 25, the table checks that agree went from 837 to 870: 36 seasons are better, and 3 seasons that agreed before do not agree now.
+
+**Why:** In each of the 3 seasons, the old parser read a part of a note as a match:
+
+```text
+CABB Arréridj   awd MC Alger       [awarded loss to both;
+[Aug 15]                           abandoned at 1-0 in 72'
+```
+
+The old "match" was `abandoned at` 1-0 `in 72'`. The real match had a score of 1-0 that stood, and the table counts it. Thus the wrong match gave the correct sum of goals by chance.
+
+**How:** A check that becomes worse needs an explanation of the lines, not only of the numbers. Here the new parser is correct, and the gap is real: an `awd` row without a score in the note has no score. The decision record shows the 3 seasons as a known gap, and not as a regression.
+
+## 23. The subject of a word
+
+**What:** `_AWARD_REVOKED` finds an award that the note revokes: `[awarded 3-0; ...; decision revoked on appeal]`.
+
+**Why:** The first rule was `award.*(revoked|annulled)`. A list of its 70 matches on the survey pages showed what the words refer to:
+
+| Note | What the word refers to |
+|---|---|
+| `awarded 2-0; later annulled` | the award |
+| `annulled; 0-3 awarded; originally 2-1` | the old result |
+| `after a penalty award to Karonga was revoked` | a penalty |
+| `award may have been revoked` | not certain |
+
+**How:** The rule became narrower. The word must be next to the award (`award of 3-0 revoked`), or at the start of a part of the note (`; later annulled`, `- annulled`, `but later annulled`). A `?` after the word means that it is not certain. Each line of the table above is a test. The lesson: for a rule with words, read all its matches on the data, not only the examples that made the rule.

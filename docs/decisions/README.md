@@ -30,3 +30,4 @@ Each file is one decision. A decision file is not deleted. If the project change
 | 22 | [The RSSSF parser: the first competition with results, line rules, and visible problems](0022-rsssf-parser.md) |
 | 23 | [Final tables are stored, and a table check compares them with the matches](0023-final-tables-and-the-table-check.md) |
 | 24 | [Choosing the national league on an RSSSF page: rules, an override, and a visible choice](0024-choosing-the-national-league-on-a-page.md) |
+| 25 | [Result lines on RSSSF pages of all African countries: more forms, more guards, and full notes](0025-result-line-forms.md) |
