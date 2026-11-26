@@ -158,15 +158,18 @@ The pipeline database is a PostgreSQL 18 container (`pipeline-db`, `localhost:54
 
 ```bash
 # The pipeline database must run (docker compose up -d)
-uv run --env-file .env python main.py
+uv run --env-file .env python main.py                  # Soccerway (the default)
+uv run --env-file .env python main.py --source rsssf   # RSSSF
 ```
 
-The pipeline writes each run to the database, and makes the JSON and TXT files from the matches in the database. Without `DATABASE_URL`, `main.py` stops with a message.
+The pipeline writes each run to the database, and makes the JSON and TXT files from the matches in the database. Without `DATABASE_URL`, `main.py` stops with a message. If the database does not have all the migrations, `main.py` stops and gives the command that applies them.
+
+The files of RSSSF are in a subfolder `rsssf/` (for example `data/raw/nigeria/npfl/rsssf/2023-24.json`). Thus an RSSSF run does not replace the Soccerway file of the same season. For the reasons, refer to [decision 30](docs/decisions/0030-rsssf-in-the-pipeline.md).
 
 The CLI presents interactive menus:
 
 1. **Select leagues** — pick one, multiple (`1,3,5`), a range (`1-5`), or all (`all`)
-2. **For each league**, the pipeline discovers available seasons from Soccerway's archive
+2. **For each league**, the pipeline discovers the available seasons: the Soccerway archive, or the RSSSF list of champions (`rsssf_index` in `config/leagues.yaml`)
 3. **Select seasons** — same flexible input format
 4. **Pipeline runs**: scrape → write to the database → read back → normalise → save → report statistics
 
@@ -271,6 +274,8 @@ For a match with a penalty shootout, `home_score` and `away_score` contain the s
 
 Season-level retry with backoff: attempt 1 (immediate) → attempt 2 (10s delay) → attempt 3 (30s delay). If all attempts fail, the pipeline logs the failure and continues to the next season. The run summary shows what succeeded and what failed.
 
+The RSSSF client also retries each page: after 5, 15, 45, 120 and 300 seconds (about 8 minutes), because DNS failures on the network can last some minutes. A page that does not exist (404) is not retried.
+
 ## Currently Supported Leagues
 
 | Country | League | Code | Submission Code | Timezone |
@@ -314,7 +319,7 @@ At the end of each step, the pipeline works.
 | 1 | Repair the Soccerway scraper with stable selectors and saved-page fixtures | ✅ Done |
 | 2 | Make a source-neutral match model and an adapter interface. Change Soccerway to fetch, parse, and raw storage. The output does not change. | ✅ Done |
 | 3 | Add the PostgreSQL schema and loading. Make the exports from the database. Add a season coverage table. | ✅ Done |
-| 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | In progress: parts 1 to 3 of 4 done (discovery, fetch, parser, final tables); fixes from the Africa survey: 5 of 5 done (the league choice, the result lines, the table headings and rows, the index, the dates) |
+| 4 | Add an RSSSF adapter. Start with the NPFL. Read multiple page formats and the final tables. | ✅ Done (`main.py --source rsssf`; the fixes from the Africa survey) |
 | 5 | Add reconciliation between sources, validation rules, and season statuses | Planned |
 | 6 | Add the Source Manager with fallback and resume. The Airflow DAG calls the library. | Planned |
 | 7 | Add more leagues from RSSSF, and federation and league sites | Later |

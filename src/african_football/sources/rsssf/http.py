@@ -29,9 +29,11 @@ BASE_URL = "https://www.rsssf.org/"
 # The minimum time between two requests, in seconds.
 DEFAULT_INTERVAL = 3.0
 
-# The waits before the retries, in seconds. Three retries after the first
-# request.
-RETRY_WAITS = (5.0, 15.0, 45.0)
+# The waits before the retries, in seconds: five retries after the first
+# request, about 8 minutes in total. The network of the project has DNS
+# failures that last some minutes. With three retries (about 1 minute), the
+# survey of November 2026 lost 2 pages (Ethiopia 2007 and 2008).
+RETRY_WAITS = (5.0, 15.0, 45.0, 120.0, 300.0)
 
 TIMEOUT = 30.0
 

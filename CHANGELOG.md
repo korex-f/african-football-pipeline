@@ -2,6 +2,27 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: RSSSF in the pipeline (roadmap step 4, part 4)
+
+**What happened:** `main.py --source rsssf` runs the pipeline with RSSSF: discovery, pages, matches, final tables, database, files. The RSSSF files are in a subfolder `rsssf/`. `main.py` stops before the menus if the database does not have all the migrations. The RSSSF client waits longer before its retries. Roadmap step 4 is done.
+
+**Why it was necessary:** No part of the pipeline used the RSSSF adapter. The first live run of the NPFL also found that the pipeline database of the project did not have migration 002: each season with a final table failed three times with an SQL error.
+
+**How the project did it** ([decision 30](docs/decisions/0030-rsssf-in-the-pipeline.md)):
+
+- `FootballScraper(source=...)` and `SOURCES`: the RSSSF adapter needs no browser, loads the final tables, and has no halftime scores.
+- `parse_args()` and `discover()` in `main.py`; the user chose a `--source` option.
+- `_source_dir()` in `utils/file_saver.py`; the user chose a subfolder for RSSSF only.
+- `pending()` in `db/migrate.py` ([db README](src/african_football/db/README.md) section 16).
+- `RETRY_WAITS` of the RSSSF client: 5, 15, 45, 120 and 300 seconds.
+
+**Verification:**
+
+1. **Live run of the NPFL:** 49 of 49 seasons succeeded, 7,983 matches. Coverage: 9 seasons `complete_single_source`. 31 seasons with a final table; 15 of 35 table checks agree. The differences have known causes: team names in different forms (step 5), goal deductions, and seasons without results.
+2. 11 new tests, also two database tests of an RSSSF run with a real page (381 matches and a table of 20 rows; a second run changes nothing) and two of `pending()`. 8 deliberate breaks, each caught.
+
+**Trade-offs:** The migration check is in `main.py` only. The Soccerway and RSSSF file paths do not have the same form. Running both sources for a league is two runs until step 6.
+
 ## November 2026: Dates on RSSSF pages
 
 **What happened:** The parser takes the years of a season from the page title for its dates, chooses the window of 12 months by a search, reads French and Portuguese month names and dates on group headings, and reports a season of more than 12 months.

@@ -7,9 +7,11 @@ Supports multi-league and multi-season batch runs with retry logic
 for failed scrapes.
 
 Typical usage:
-    uv run python main.py
+    uv run --env-file .env python main.py                  # Soccerway
+    uv run --env-file .env python main.py --source rsssf   # RSSSF
 """
 
+import argparse
 import asyncio
 import os
 import sys
@@ -17,11 +19,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import psycopg
+
 from african_football.config.config_loader import load_leagues
+from african_football.db.migrate import pending
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord
-from african_football.scraping.scraper import FootballScraper
+from african_football.scraping.scraper import SOURCES, FootballScraper
 from african_football.scraping.season_discoverer import SeasonDiscoverer
+from african_football.sources.rsssf.adapter import RsssfAdapter
 from african_football.utils.file_saver import build_season_str, save_json, save_txt
 from african_football.utils.logger import PipelineLogger
 from african_football.utils.team_normalizer import TeamNormalizer
@@ -195,6 +201,7 @@ async def retry_scrape(
     season: SeasonRecord,
     logger: PipelineLogger,
     headless: bool = HEADLESS,
+    source: str = SOURCES[0],
 ) -> tuple[dict[str, Any] | None, str | None]:
     """
     Attempt to scrape a season with retry logic on failure.
@@ -208,6 +215,7 @@ async def retry_scrape(
         season:   SeasonRecord to scrape.
         logger:   Pipeline logger instance.
         headless: Whether to run the browser in headless mode.
+        source:   'soccerway' or 'rsssf'.
 
     Returns:
         A tuple of (data_dict, statistics_report) on success,
@@ -227,6 +235,7 @@ async def retry_scrape(
                 logger,
                 headless,
                 database_url=os.environ.get("DATABASE_URL"),
+                source=source,
             ) as scraper:
                 data = await scraper.scrape()
                 report = scraper.get_statistics_report()
@@ -307,6 +316,7 @@ async def run_single(
     league: LeagueConfig,
     season: SeasonRecord,
     logger: PipelineLogger,
+    source: str = SOURCES[0],
 ) -> dict[str, Any]:
     """
     Run the full pipeline for a single league season.
@@ -318,6 +328,8 @@ async def run_single(
         league: League configuration.
         season: SeasonRecord to process.
         logger: Pipeline logger instance.
+        source: 'soccerway' or 'rsssf'. The files of RSSSF are in a
+                subfolder 'rsssf'.
 
     Returns:
         A result dictionary with status, paths, and metadata.
@@ -335,7 +347,7 @@ async def run_single(
     logger.log_section(f"SCRAPING: {league.name} - {season.season}")
 
     # Scrape with retry
-    data, report = await retry_scrape(league, season, logger)
+    data, report = await retry_scrape(league, season, logger, source=source)
 
     if data is None:
         result["status"] = "failed"
@@ -349,8 +361,10 @@ async def run_single(
     data = normalise_team_names(data, league, season, logger)
 
     # Save outputs
-    json_path = save_json(data, league, season.start_year, season.end_year)
-    txt_path = save_txt(data, league, season.start_year, season.end_year)
+    json_path = save_json(
+        data, league, season.start_year, season.end_year, source=source
+    )
+    txt_path = save_txt(data, league, season.start_year, season.end_year, source=source)
 
     result.update(
         {
@@ -418,13 +432,42 @@ def print_run_summary(results: list[dict[str, Any]], start_time: datetime) -> No
 # ──--------------------------------- Entry Point ----------------------------------
 
 
-async def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Read the command line: the source of the run."""
+    parser = argparse.ArgumentParser(description="African football pipeline")
+    parser.add_argument(
+        "--source",
+        choices=SOURCES,
+        default=SOURCES[0],
+        help="the source of the data (default: %(default)s)",
+    )
+    return parser.parse_args(argv)
+
+
+async def discover(
+    league: LeagueConfig, logger: PipelineLogger, source: str
+) -> list[SeasonRecord]:
+    """Give the seasons of a league from the source.
+
+    Soccerway: the season list of the league page (a browser). RSSSF: the
+    list of champions in leagues.yaml (rsssf_index and rsssf_section).
+    """
+    if source == "rsssf":
+        return await RsssfAdapter(logger).discover_seasons(league)
+    async with SeasonDiscoverer(league, logger, headless=HEADLESS) as discoverer:
+        return await discoverer.discover()
+
+
+async def main(source: str = SOURCES[0]) -> None:
     """
     Main entry point for the African football pipeline CLI.
 
     Loads configuration, presents interactive menus for league and
     season selection, runs the scraping pipeline for each selection,
     and prints a final summary.
+
+    Args:
+        source: 'soccerway' or 'rsssf' (the --source option).
     """
     # The pipeline writes each run to the database, and makes the exports
     # from it. Stop before the menus, not after the first scrape.
@@ -434,11 +477,22 @@ async def main() -> None:
             "and run: uv run --env-file .env python main.py"
         )
 
+    # A database without the newest migrations fails in each season. Stop
+    # before the menus, with the command that applies them.
+    with psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=10) as conn:
+        missing = pending(conn)
+    if missing:
+        sys.exit(
+            f"The database does not have the migrations {', '.join(missing)}. Run: "
+            "uv run --env-file .env python -m african_football.db.migrate"
+        )
+
     logger = PipelineLogger()
     start_time = datetime.now()
 
     logger.log_section("AFRICAN FOOTBALL PIPELINE")
     logger.log(f"Started at {start_time.isoformat()}")
+    logger.log(f"Source: {source}")
 
     # Load league configuration
     try:
@@ -463,10 +517,7 @@ async def main() -> None:
 
         # Discover seasons
         try:
-            async with SeasonDiscoverer(
-                league, logger, headless=HEADLESS
-            ) as discoverer:
-                seasons = await discoverer.discover()
+            seasons = await discover(league, logger, source)
         except Exception as e:
             logger.log(
                 f"Failed to discover seasons for {league.name}: {e}",
@@ -494,7 +545,7 @@ async def main() -> None:
 
         # Run pipeline for each selected season
         for season in selected_seasons:
-            result = await run_single(league, season, logger)
+            result = await run_single(league, season, logger, source)
             results.append(result)
 
     # Final summary
@@ -503,4 +554,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(parse_args().source))

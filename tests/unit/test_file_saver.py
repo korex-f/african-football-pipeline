@@ -203,3 +203,26 @@ class TestFormatRoundHeader:
 
     def test_semi_final_unchanged(self):
         assert _format_round_header("Semi-Final") == "Semi-Final"
+
+
+# ------------------------------- Source folders --------------------------------------
+
+
+class TestSourceFolder:
+    """The files of a source other than Soccerway are in a subfolder."""
+
+    def test_soccerway_paths_do_not_change(self, nigeria_npfl, tmp_path):
+        assert _build_json_path(nigeria_npfl, 2023, 2024, tmp_path) == (
+            tmp_path / "nigeria" / "npfl" / "2023-24.json"
+        )
+        assert _build_txt_path(nigeria_npfl, 2023, 2024, tmp_path, "soccerway") == (
+            tmp_path / "nigeria" / "npfl" / "2023-24_ng1.txt"
+        )
+
+    def test_rsssf_paths_have_a_source_folder(self, nigeria_npfl, tmp_path):
+        assert _build_json_path(nigeria_npfl, 2023, 2024, tmp_path, "rsssf") == (
+            tmp_path / "nigeria" / "npfl" / "rsssf" / "2023-24.json"
+        )
+        assert _build_txt_path(nigeria_npfl, 2023, 2024, tmp_path, "rsssf") == (
+            tmp_path / "nigeria" / "npfl" / "rsssf" / "2023-24_ng1.txt"
+        )

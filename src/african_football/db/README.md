@@ -255,3 +255,11 @@ INSERT INTO source_tables (...) VALUES (...);   -- one for each row
 - **A fake adapter.** The scraper tests give `FootballScraper` an object with the adapter methods, and fixed data. They do not use a browser or the network.
 - **A test that proves the data path.** `test_scraper_exports_the_matches_from_the_database` replaces `read_season_matches` with a function that gives a different match than the parser. The output must show the match of the reader. Without this test, an export from the matches in memory gives the same output, and no test fails.
 - **Deliberate breaks.** For each important line, the project broke the code on purpose, and one test had to fail. For the loader: the transaction of `load()`, `IS DISTINCT FROM`, the `CASE` of `updated_at`, `BaseException`, and the count of `pages_fetched`. For the reader and the coverage: the export from memory, the `last_run_id` filter, `status = 'succeeded'`, `page_position`, the `WHERE` of the conditional upsert, `DO NOTHING` in `fail()`, and the count of postponed matches.
+
+## 16. A check that only reads, before the work starts
+
+**What:** `pending(conn)` gives the migration files that the database does not have. `main.py` calls it before the menus ([decision 30](../../../docs/decisions/0030-rsssf-in-the-pipeline.md)).
+
+**Why:** The first live run of RSSSF found a database without migration 002. The error (`relation "source_tables" does not exist`) came in each season, after three attempts with waits. A check before the work gives one message with the command that corrects it.
+
+**How:** The check does not change the database: it does not make `schema_migrations` (`migrate()` does). `to_regclass('schema_migrations')` gives NULL for a table that does not exist, without an error. Then the check compares the versions in the table with the files in `migrations/`.

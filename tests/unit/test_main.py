@@ -142,3 +142,20 @@ class TestNormalizeTeamNames:
         result = normalise_team_names(data, nigeria_npfl, completed_season, logger)
         assert result["stages"] == []
         main.CANONICAL_TEAMS_DIR = original_dir
+
+
+# ----------------------------- parse_args ----------------------------------------
+
+
+class TestParseArgs:
+    """The --source option of the command line."""
+
+    def test_default_source_is_soccerway(self):
+        assert main.parse_args([]).source == "soccerway"
+
+    def test_rsssf_source(self):
+        assert main.parse_args(["--source", "rsssf"]).source == "rsssf"
+
+    def test_unknown_source_stops(self):
+        with pytest.raises(SystemExit):
+            main.parse_args(["--source", "flashscore"])
