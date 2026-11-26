@@ -2,6 +2,21 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: Season lines in the lists of champions
+
+**What happened:** `parse_index()` reads season lines with a row number or italics before the link, seasons with `-` (`2021-22`), and a heading with a column label before it (`year    <b>PSL</b>`).
+
+**Why it was necessary:** The survey found season links that the index did not read: all the seasons of Congo from 1979 to 1994 were missing, and South Africa's 30 PSL seasons were in the wrong list.
+
+**How the project did it** ([decision 28](docs/decisions/0028-index-line-forms.md)): `_SEASON_LINE`, `_LABEL` and `_BOLD_LINE`. A script compared every link with a year in the 55 lists with the entries (module README section 27).
+
+**Verification:**
+
+1. **55 lists of the survey**, compared with `main`: 22 new entries, 30 entries in the correct section, 0 entries lost. Links not read: 11 of 2,762 (33), each with a reason. Nigeria, Ghana and Egypt do not change.
+2. 14 new tests, with 2 lists of champions as fixtures (Congo, South Africa). 5 deliberate breaks, each caught.
+
+**Trade-offs:** `1974,1`, `1966-68` and the typo `1990/00` are not read. A line with several columns keeps all of them in its champion text.
+
 ## November 2026: Table row forms on RSSSF pages
 
 **What happened:** The table reader reads two more forms of a full row (goals in two columns, points first) and a mark after the points.
