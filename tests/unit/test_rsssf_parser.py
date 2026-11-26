@@ -135,7 +135,8 @@ def test_stages_and_groups():
 
 def test_tabs_and_replays():
     matches, problems = _parse("nig05.html", 2005, 2005)
-    assert len(matches) == 389
+    # 389 played and 4 postponed ('ppd') matches.
+    assert len(matches) == 393
     assert problems == []
     [kwara] = _find(matches, "Kwara", "Nationale")  # 'Kwara\t\t3-0 Nationale'
     assert (kwara.home_goals, kwara.away_goals, kwara.match_date) == (
@@ -149,7 +150,8 @@ def test_tabs_and_replays():
 def test_table_in_the_middle_does_not_end_the_league():
     # nig01 has 'Table:' after round 10 and after round 20.
     matches, _ = _parse("nig01.html", 2001, 2001)
-    assert len(matches) == 242
+    # 242 played, 1 postponed ('ppd') and 1 annulled ('ann') match.
+    assert len(matches) == 244
     assert {m.stage for m in matches} == {"Nigeria 2001"}
 
 
@@ -166,7 +168,8 @@ def test_cup_after_the_final_table_is_not_the_league():
     # The Egypt Cup starts after the final table, without a heading. It has
     # 'bt' and 'drw' lines; the league has none.
     matches, _ = _parse("egy05.html", 2004, 2005)
-    assert len(matches) == 176
+    # 26 rounds of 7 matches. Round 19 has scores with an en dash ('3–1').
+    assert len(matches) == 182
     assert {m.status for m in matches} == {MatchStatus.PLAYED}
     assert "Assiut Petrol." not in {m.home_team_raw for m in matches}
 
@@ -397,6 +400,93 @@ def _match(row: ResultRow) -> SourceMatch:
         ("bt", None, MatchStatus.UNKNOWN, (None, None), (None, None)),
         ("lt", None, MatchStatus.UNKNOWN, (None, None), (None, None)),
         ("drw", None, MatchStatus.UNKNOWN, (None, None), (None, None)),
+        # Decision 25.
+        ("3-0*", "* aet", MatchStatus.PLAYED, (3, 0), (None, None)),
+        ("3-?", None, MatchStatus.UNKNOWN, (None, None), (None, None)),
+        ("?-?", None, MatchStatus.UNKNOWN, (None, None), (None, None)),
+        ("tie", None, MatchStatus.UNKNOWN, (None, None), (None, None)),
+        ("---", None, MatchStatus.UNKNOWN, (None, None), (None, None)),
+        ("ppd", None, MatchStatus.POSTPONED, (None, None), (None, None)),
+        (
+            "ann",
+            "annulled; finished 1-0",
+            MatchStatus.CANCELLED,
+            (None, None),
+            (None, None),
+        ),
+        ("n/p", None, MatchStatus.CANCELLED, (None, None), (None, None)),
+        (
+            "n/p",
+            "0-3 awarded; Ranchers Bees dns",
+            MatchStatus.AWARDED,
+            (0, 3),
+            (None, None),
+        ),
+        # An award that the note revokes does not count.
+        (
+            "n/p",
+            "awarded 3-0, Hearts of Oak dns; decision revoked on appeal",
+            MatchStatus.CANCELLED,
+            (None, None),
+            (None, None),
+        ),
+        (
+            "n/p",
+            "first awarded 0-3, Forest dns; award revoked Aug 6",
+            MatchStatus.CANCELLED,
+            (None, None),
+            (None, None),
+        ),
+        (
+            "awd",
+            "African Stars dns; awarded 2-0; later annulled",
+            MatchStatus.CANCELLED,
+            (None, None),
+            (None, None),
+        ),
+        (
+            "awd",
+            "Kagera dns, awarded 2-0 - annulled",
+            MatchStatus.CANCELLED,
+            (None, None),
+            (None, None),
+        ),
+        (
+            "n/p",
+            "Raadsan dns; awarded 3-0 but later annulled",
+            MatchStatus.CANCELLED,
+            (None, None),
+            (None, None),
+        ),
+        # These notes do not revoke the award.
+        (
+            "awd",
+            "annulled; 0-3 awarded; originally 2-1",
+            MatchStatus.AWARDED,
+            (0, 3),
+            (None, None),
+        ),
+        (
+            "awd",
+            "awarded 0-2; abandoned at 0-1 after a penalty award to Karonga was revoked",
+            MatchStatus.AWARDED,
+            (0, 2),
+            (None, None),
+        ),
+        (
+            "awd",
+            "awarded 2-0, Nakuru dns; to be annulled?",
+            MatchStatus.AWARDED,
+            (2, 0),
+            (None, None),
+        ),
+        (
+            "awd",
+            "awarded 0-3, BA United used ineligible player; award revoked?",
+            MatchStatus.AWARDED,
+            (0, 3),
+            (None, None),
+        ),
     ],
 )
 def test_result_to_source_match(result, note, status, goals, penalties):
@@ -498,3 +588,183 @@ def test_competition_heading_without_underline():
     league = top_league(page)
     assert league is not None
     assert [r.home for r in parse_lines(league, 2003, 2003).rows] == ["Hearts of Oak"]
+
+
+# ---------------------------------------------------------------------------
+# Result-line forms (decision 25)
+# ---------------------------------------------------------------------------
+
+
+def test_algeria_1972_73_scores_with_an_en_dash():
+    # All scores have an en dash ('1–1'). Before decision 25, 1 match.
+    # The page gives round 10 two times (the same 8 lines): 240 + 8.
+    matches, problems = _parse("alg73.html", 1972, 1973)
+    assert len(matches) == 248
+    assert problems == []
+    assert Counter(m.round_name for m in matches)["Round 10"] == 16
+    [match] = _find(matches, "CS Constantine", "MC Alger")[:1]
+    assert (match.home_goals, match.away_goals) == (1, 1)
+
+
+def test_morocco_1995_96_teams_first_and_underlined_rounds():
+    # 'COD Meknes      - SA Sale           5-2'. Each 'Round N' has a line
+    # of '=' under it: a round of the league, not a new competition.
+    matches, problems = _parse("maro96.html", 1995, 1996)
+    assert top_league(_page("maro96.html")).name == "Morocco 1995/96"  # pyright: ignore[reportOptionalMemberAccess]
+    assert len(matches) == 240
+    assert problems == []
+    [match] = _find(matches, "COD Meknes", "SA Sale")
+    assert (match.round_name, match.home_goals, match.away_goals) == ("Round 1", 5, 2)
+
+
+def test_two_leg_lines_are_reported():
+    # 'ex-Benfica Nampula  2-0  1-5 AD Pemba  [agg 3-5]': the order of the
+    # second leg is not certain. The parser does not read these lines.
+    matches, problems = _parse("moz78.html", 1978, 1978)
+    assert len(matches) == 11
+    assert problems == ["5 lines of two-leg ties not read"]
+    assert _find(matches, "ex-Benfica Nampula", "AD Pemba") == []
+
+
+def test_grid_rows_with_a_mark_are_reported():
+    # 'Simunye FC 0-2 1-1 awd 0-3 ... xxx 0-2': not 'Simunye FC 0-2 1-1'.
+    matches, problems = _parse("swaz97.html", 1997, 1997)
+    assert len(matches) == 13
+    assert problems == ["16 lines of a results grid or crosstable not read"]
+
+
+def test_score_in_a_note_is_not_a_result():
+    # '[Sep 26]       as a 2-0 win]' ends the note of 'Stade  awd
+    # Bingerville', in a column at the right: it is a part of that note.
+    matches, problems = _parse("ivo04.html", 2004, 2004)
+    assert len(matches) == 182
+    assert problems == []
+    league = top_league(_page("ivo04.html"))
+    assert league is not None
+    rows = parse_lines(league, 2004, 2004).rows
+    [row] = [r for r in rows if (r.home, r.away) == ("Stade", "Bingerville")]
+    assert row.note is not None and row.note.endswith("as a 2-0 win")
+
+
+def test_sentence_with_numbers_is_not_a_result():
+    # 'Rounds 10-14 and final tables missing.'
+    matches, problems = _parse("burkf98.html", 1997, 1998)
+    assert len(matches) == 8
+    assert problems == []
+
+
+def test_team_name_in_lower_case():
+    # 'kotoko           2-0 New Edubiase': a wide gap, thus not a sentence.
+    matches, _ = _parse("gha2010.html", 2009, 2010)
+    assert len(matches) == 240
+    assert len(_find(matches, "kotoko", "New Edubiase")) == 1
+
+
+def test_scores_in_a_note_do_not_make_a_grid_row():
+    # 'Fovu  1-1 Canon  [awarded 3-0; originally 1-1, ...': three scores,
+    # two of them in the note.
+    matches, problems = _parse("kam2015.html", 2015, 2015)
+    assert len(matches) == 309
+    assert problems == []
+    assert len(_find(matches, "Fovu", "Canon")) == 1
+
+
+def test_result_word_in_upper_case():
+    # 'Express   Ppd UEB'
+    matches, _ = _parse("oeg97.html", 1997, 1997)
+    assert Counter(m.status for m in matches) == {
+        MatchStatus.PLAYED: 91,
+        MatchStatus.POSTPONED: 4,
+    }
+
+
+def test_new_result_line_forms():
+    rows = _rows(
+        "MC Oran \t\t1–1 JSM Tiaret\n"
+        "Académica   1-0  0-2* Desportivo\t[* aet]\n"
+        "Jijel SD    3-0* CRE Constantine\n"
+        "Jijel SD    3-0*CRE Constantine\n"
+        "Sharks      ?-? Lobi\n"
+        "Wikki       3-? Pillars\n"
+        "Bo Rangers  --- Old Edwardians\n"
+        "Gombe       ppd Enyimba\n"
+        "Gabros      ann El Kanemi   [annulled; finished 1-0]\n"
+        "Kenya Rlys  tie Lake Warriors\n"
+        "Al-Menya - Al-Ahly   1-3\n"
+        "FC HellBourg. - US Ste Anne : 6-1\n"
+    )
+    assert [(r.home, r.result, r.away) for r in rows] == [
+        ("MC Oran", "1-1", "JSM Tiaret"),
+        ("Jijel SD", "3-0*", "CRE Constantine"),
+        ("Jijel SD", "3-0*", "CRE Constantine"),
+        ("Sharks", "?-?", "Lobi"),
+        ("Wikki", "3-?", "Pillars"),
+        ("Bo Rangers", "---", "Old Edwardians"),
+        ("Gombe", "ppd", "Enyimba"),
+        ("Gabros", "ann", "El Kanemi"),
+        ("Kenya Rlys", "tie", "Lake Warriors"),
+        ("Al-Menya", "1-3", "Al-Ahly"),
+        ("FC HellBourg.", "6-1", "US Ste Anne"),
+    ]
+
+
+def test_new_lines_that_are_not_results():
+    parsed = parse_lines(
+        Competition(
+            "League",
+            "MC Alger   -  Paradou AC\n"
+            "Round 19 [postponed from Mar 2-4 due to a strike]\n"
+            "Table (based on known results w/o some goals):\n"
+            "losing 1-2 to SO Armée in round 13\n"
+            "Fovu  1-1 Canon  [award of 3-0 revoked\n"
+            "Denver Sun 1-0 xxx 1-0 2-1\n"
+            "Buffles du Borgou        XXX    1-0    XXX    0-0    3-1\n"
+            "13 CS Hammam Lif   \t26   6   8  12  22  30   26  [0 1 1 2-3 1] Relegated\n"
+            "Etoile du Congo  11-0 5-0 Racing Club\n",
+        ),
+        2003,
+        2003,
+    )
+    assert [(r.home, r.away) for r in parsed.rows] == [("Fovu", "Canon")]
+    # A table row without '13.' has the form of a result: it is reported.
+    assert parsed.unparsed == [
+        "losing 1-2 to SO Armée in round 13",
+        "13 CS Hammam Lif   \t26   6   8  12  22  30   26  [0 1 1 2-3 1] Relegated",
+    ]
+    assert (parsed.grid_lines, parsed.two_leg_lines) == (2, 1)
+
+
+def test_note_parts_in_a_column_join_their_note():
+    # The next parts of a note are at the right of the next lines: after a
+    # date, or after the next result.
+    rows = _rows(
+        "Orlando Pirates   awd African Stars     [African Stars dns;\n"
+        "[Jun 17]                                 awarded 2-0; later annulled]\n"
+        "Tema Youth        n/p Hearts of Oak     [awarded 3-0, Hearts of Oak dns;\n"
+        "King Faisal       1-1 Heart of Lions     3 points deducted;\n"
+        "[Oct 22]                                 decision revoked on appeal]\n"
+        "Kotoko            2-0 Hearts of Oak\n"
+        "Fovu              1-1 Canon             [awarded 3-0; Canon used an\n"
+        "                                         ineligible player]\n"
+    )
+    assert [(r.home, r.note) for r in rows] == [
+        ("Orlando Pirates", "African Stars dns; awarded 2-0; later annulled"),
+        (
+            "Tema Youth",
+            "awarded 3-0, Hearts of Oak dns; 3 points deducted; "
+            "decision revoked on appeal",
+        ),
+        ("King Faisal", None),
+        ("Kotoko", None),
+        ("Fovu", "awarded 3-0; Canon used an ineligible player"),
+    ]
+    assert rows[3].match_date == date(2023, 10, 22)
+
+
+def test_scorers_do_not_join_the_note_of_a_result():
+    rows = _rows(
+        "Zamalek       4-1 G Mehalla   [replay;\n"
+        "  [Tamer Abdel Hamid 47,\n"
+        "   Abdel Halim Ali 80]\n"
+    )
+    assert rows[0].note == "replay;"

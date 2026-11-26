@@ -50,3 +50,19 @@ These pages come from a survey of 56 African countries (November 2026). Each sho
 | `seasons/ethi08.html` | https://www.rsssf.org/tablese/ethi08.html | Mamo Gebrehiwot and RSSSF | 1 Dec 2016 | A sentence before the league heading |
 | `seasons/reunion2022.html` | https://www.rsssf.org/tablesr/reunion2022.html | Hans Schöggl and RSSSF | 12 Jul 2023 | 'Régional 1' is the top league of Réunion |
 
+## Season pages for the result-line forms (`seasons/`, decision 25)
+
+These pages also come from the survey. Each shows one form of a result line, or one line that is not a result. `tests/unit/test_rsssf_parser.py` reads them.
+
+| File | Page | Authors | Last updated (on the page) | Form that the file shows |
+|---|---|---|---|---|
+| `seasons/alg73.html` | https://www.rsssf.org/tablesa/alg73.html | Michel Menard and RSSSF | 14 Mar 2026 | Scores with an en dash (`1–1`); round 10 two times |
+| `seasons/maro96.html` | https://www.rsssf.org/tablesm/maro96.html | Hans van Haren and RSSSF | 30 Sep 1999 | Teams first (`COD Meknes  - SA Sale  5-2`); rounds with a line of `=` |
+| `seasons/moz78.html` | https://www.rsssf.org/tablesm/moz78.html | José Batalha, Todor Krastev and RSSSF | 27 Oct 2016 | Two-leg ties (not read; reported) |
+| `seasons/swaz97.html` | https://www.rsssf.org/tabless/swaz97.html | RSSSF | 26 Oct 2006 | A results grid with `xxx` and `awd` (not read; reported) |
+| `seasons/ivo04.html` | https://www.rsssf.org/tablesi/ivo04.html | José Batalha and RSSSF | 12 Feb 2005 | A part of a note with a score, at the right of a date |
+| `seasons/burkf98.html` | https://www.rsssf.org/tablesb/burkf98.html | Hans Schöggl and RSSSF | 9 Jul 2009 | A sentence with numbers (`Rounds 10-14 and final tables missing.`) |
+| `seasons/gha2010.html` | https://www.rsssf.org/tablesg/gha2010.html | José Batalha and RSSSF | 5 Jan 2011 | A team name in lower case (`kotoko`) |
+| `seasons/kam2015.html` | https://www.rsssf.org/tablesk/kam2015.html | José Batalha and RSSSF | 18 Mar 2021 | Scores in a note (`[awarded 3-0; originally 1-1, ...]`) |
+| `seasons/oeg97.html` | https://www.rsssf.org/tableso/oeg97.html | Mikael Jönsson and RSSSF | 27 Aug 2010 | A result word in upper case (`Ppd`) |
+
