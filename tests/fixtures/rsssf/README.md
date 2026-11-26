@@ -87,3 +87,10 @@ These pages come from the survey. Each shows one form of a table heading. `tests
 | `seasons/reunion99.html` | https://www.rsssf.org/tablesr/reunion99.html | Jacques Lallemand, Hans Schöggl, Ian King and RSSSF | 20 Dec 2007 | The points first (4 points for a win) |
 | `seasons/swaz71.html` | https://www.rsssf.org/tabless/swaz71.html | Neil Morrison and RSSSF | 18 Dec 2014 | A mark after the points (`5*`) |
 
+## Season pages for the dates (`seasons/`, decision 29)
+
+| File | Page | Authors | Last updated (on the page) | Form that the file shows |
+|---|---|---|---|---|
+| `seasons/ango2019.html` | https://www.rsssf.org/tablesa/ango2019.html | José Batalha and RSSSF | 21 Aug 2019 | The list gives `2019`; the title is `Angola 2018/19` |
+| `seasons/burkf01.html` | https://www.rsssf.org/tablesb/burkf01.html | José António da Vila Mona Batalha, Hans Schöggl and RSSSF | 9 Jul 2009 | A calendar-year season that starts in December of the year before |
+| `seasons/tsja08.html` | https://www.rsssf.org/tablest/tsja08.html | Hans Schöggl, José Batalha and RSSSF | 14 Oct 2021 | August before July on the page |

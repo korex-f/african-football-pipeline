@@ -43,6 +43,7 @@ year.
 
 import html
 import re
+import unicodedata
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Optional
@@ -50,6 +51,7 @@ from typing import Optional
 from pydantic import ValidationError
 
 from african_football.models.source_match import MatchStatus, SourceMatch
+from african_football.sources.rsssf.index import parse_season_years
 
 # ---------------------------------------------------------------------------
 # Patterns
@@ -61,6 +63,11 @@ _H4_PRE = re.compile(
 )
 _PRE = re.compile(r"<pre[^>]*>(?P<text>.*?)</pre>", re.IGNORECASE | re.DOTALL)
 _TITLE = re.compile(r"<h2[^>]*>(?P<title>.*?)</h2>", re.IGNORECASE | re.DOTALL)
+
+# The <title> of a season page, and a season text in it: 'Angola 2018/19',
+# 'Botswana 1999/2000', 'Nigeria 2015'.
+_PAGE_TITLE = re.compile(r"<title>(?P<title>.*?)</title>", re.IGNORECASE | re.DOTALL)
+_TITLE_SEASON = re.compile(r"\b\d{4}(?:/(?:\d{4}|\d{2}))?\b")
 
 # A stage or group heading in structure A: <b>Group Stage</b>, <u>Group A</u>.
 _STAGE_TAG = re.compile(r"^\s*<(b|u)>(?P<text>.*?)</\1>\s*$", re.IGNORECASE)
@@ -142,30 +149,40 @@ _AFTER_TABLE = re.compile(
     r"^\s*(?:-[ -]*$|NB|Promoted|Relegated|Champions|\(|\[)|^\s+\S", re.IGNORECASE
 )
 
+# The months: the first 3 letters, without accents, in English, French
+# and Portuguese (decision 29). 'juin' and 'juil' (French) have the same
+# first 3 letters, thus they are full words.
 _MONTHS = {
-    name: number
-    for number, name in enumerate(
-        [
-            "jan",
-            "feb",
-            "mar",
-            "apr",
-            "may",
-            "jun",
-            "jul",
-            "aug",
-            "sep",
-            "oct",
-            "nov",
-            "dec",
-        ],
-        start=1,
-    )
+    **dict.fromkeys(["jan"], 1),
+    **dict.fromkeys(["feb", "fev"], 2),
+    **dict.fromkeys(["mar"], 3),
+    **dict.fromkeys(["apr", "avr", "abr"], 4),
+    **dict.fromkeys(["may", "mai"], 5),
+    **dict.fromkeys(["jun", "juin"], 6),
+    **dict.fromkeys(["jul", "juil"], 7),
+    **dict.fromkeys(["aug", "aou", "ago"], 8),
+    **dict.fromkeys(["sep", "set"], 9),
+    **dict.fromkeys(["oct", "out"], 10),
+    **dict.fromkeys(["nov"], 11),
+    **dict.fromkeys(["dec", "dez"], 12),
 }
+
+
+def _month(word: str) -> Optional[int]:
+    """Give the number of a month name ('Sep', 'Sept.', 'Mai', 'Févr',
+    'Juin', 'Outubro'), or None."""
+    text = "".join(
+        c for c in unicodedata.normalize("NFKD", word.lower()) if c.isalpha()
+    )
+    if text.startswith(("juin", "juil")):
+        return _MONTHS[text[:4]]
+    return _MONTHS.get(text[:3])
+
+
 # The first day of a date in [ ]: [Sep 15], [Sep 15, 2023], [Mar 24,25],
 # [Feb 28/Mar 1?].
 _DATE = (
-    r"\[(?P<mon>[A-Za-z]{3})[a-z]*\.? (?P<day>\d{1,2})"
+    r"\[(?P<mon>[^\W\d_]{3,9})\.? (?P<day>\d{1,2})"
     r"(?:, ?(?P<year>\d{4}))?(?:[,/][^\]]*)?\??\]"
 )
 _DATE_LINE = re.compile(rf"^\s*{_DATE}")
@@ -185,8 +202,12 @@ _PLAYOFF_STAGE = re.compile(
     re.IGNORECASE,
 )
 
-# A zone heading in a round: Zone 1 [Oct 1]
-_ZONE = re.compile(rf"^\s*(?P<name>Zone \w+)\s*(?:{_DATE})?\s*$", re.IGNORECASE)
+# A zone or a group heading in a round, with an optional date: Zone 1
+# [Oct 1], Group A [Aug 13], Poule B [Feb 15,16] (decision 29).
+_ZONE = re.compile(
+    rf"^\s*(?P<name>(?:Zone|Group|Groupe|Grupo|Poule|Pool) \w+)\s*(?:{_DATE})?\s*$",
+    re.IGNORECASE,
+)
 
 # The result words (decision 25): awarded, abandoned, walkover, unknown,
 # beat, lost to, draw, tie (a draw), not played, postponed, annulled, and
@@ -313,6 +334,13 @@ class ParseResult:
     # Lines of a two-leg tie ('A  1-0 3-2  B'). The order of the second leg
     # is not certain from the line, thus the parser does not read them.
     two_leg_lines: int = 0
+    # Dates more than 200 days before the date of the row before them
+    # (decision 29). A season of more than 12 months (Egypt 2019/20, after
+    # the stop for COVID-19) does not fit the window of 12 months: some of
+    # its dates can have a wrong year. The limit is lower than the 250 days
+    # of _date_window(): a problem tells a person to look, and Egypt
+    # 2019/20 goes back 210 days.
+    year_jumps: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +751,8 @@ def parse_lines(
     round_name: Optional[str] = None
     round_number: Optional[int] = None
     current_date: Optional[date] = None
-    first_month: Optional[int] = None
+    # The first month of the date window and its year (decision 29).
+    first_month, first_year = _date_window(competition.text, start_year, end_year)
     open_note = False
     # The index in result.rows of the row whose note is open, or None (an
     # open list of scorers, or no open note).
@@ -742,18 +771,14 @@ def parse_lines(
             note_row = None
 
     def to_date(match: re.Match[str]) -> Optional[date]:
-        nonlocal first_month
-        month = _MONTHS.get(match["mon"].lower())
+        month = _month(match["mon"])
         if month is None:
             return None
-        if first_month is None:
-            first_month = month
-        if match["year"]:
-            year = int(match["year"])
-        elif start_year == end_year or month >= first_month:
-            year = start_year
-        else:
-            year = end_year
+        # A window of 12 months from the first month: a month before the
+        # first month is in the next year.
+        year = int(match["year"]) if match["year"] else None
+        if year is None:
+            year = first_year if month >= first_month else first_year + 1
         try:
             return date(year, month, int(match["day"]))
         except ValueError:
@@ -867,7 +892,69 @@ def parse_lines(
                 note=note or None,
             )
         )
+    dates = [r.match_date for r in result.rows if r.match_date is not None]
+    result.year_jumps = sum((a - b).days > 200 for a, b in zip(dates, dates[1:]))
     return result
+
+
+def _date_window(text: str, start_year: int, end_year: int) -> tuple[int, int]:
+    """Give the first month of the date window of a season, and its year
+    (decision 29).
+
+    A date without a year is in the first year if its month is on or after
+    the first month, else in the next year. The function tests each first
+    month (1 to 12) and each first year (the year before the season, the
+    start year, the end year). It keeps the window with:
+
+    1. the fewest jumps of more than 250 days back between two dates in
+       page sequence. A wrong year makes such a jump; a postponed match
+       listed in its round makes a smaller one. A long gap forward is not
+       a jump: a page can have rounds without dates. A date with its year
+       on the page ('[Dec 28, 2008]') does not count: the window does not
+       change it, and as a date without a year it can pull the window;
+    2. then the fewest dates outside the years of the season;
+    3. then, for a season over two years, the fewest dates in the wrong
+       half: July to December in the start year, January to June in the
+       end year (a page with only the dates of February to June of a
+       season 2023/24 gives 2024);
+    4. then the first month nearest to the first date on the page (the rule
+       before decision 29).
+
+    Examples from the survey: Burkina Faso 2001 starts on [Dec 23] in 2000;
+    Namibia 1992 ends in January 1993; Chad 2008 lists August before July.
+    """
+    dates = [
+        (month, min(int(match["day"]), 28))
+        for match in re.finditer(_DATE, text)
+        if (month := _month(match["mon"])) is not None and not match["year"]
+    ]
+    if not dates:
+        return 1, start_year
+    page_first = dates[0][0]
+    best: Optional[tuple[tuple[int, int, int, int], tuple[int, int]]] = None
+    for first_year in sorted({start_year - 1, start_year, end_year}):
+        for first_month in range(1, 13):
+            days: list[date] = []
+            for month, day in dates:
+                if month >= first_month:
+                    days.append(date(first_year, month, day))
+                else:
+                    days.append(date(first_year + 1, month, day))
+            jumps = sum((a - b).days > 250 for a, b in zip(days, days[1:]))
+            outside = sum(not start_year <= d.year <= end_year for d in days)
+            wrong_half = (
+                sum(d.year != (start_year if d.month >= 7 else end_year) for d in days)
+                if start_year != end_year
+                else 0
+            )
+            distance = min(
+                (first_month - page_first) % 12, (page_first - first_month) % 12
+            )
+            score = (jumps, outside, wrong_half, distance)
+            if best is None or score < best[0]:
+                best = (score, (first_month, first_year))
+    assert best is not None
+    return best[1]
 
 
 # ---------------------------------------------------------------------------
@@ -969,6 +1056,22 @@ def match_ids(rows: list[ResultRow], league_code: str, season: str) -> list[str]
     return ids
 
 
+def title_years(page: str) -> Optional[tuple[int, int]]:
+    """Give the years of the season in the <title> of a season page, or None.
+
+    The list of champions can give one year for a season over two years:
+    '2019' links to the page 'Angola 2018/19' (375 seasons of the survey).
+    The page title is exact. The parser uses it only for the year of the
+    dates; the season label stays the label of the list (decision 29).
+    The last season text of the title is used.
+    """
+    match = _PAGE_TITLE.search(page)
+    if match is None:
+        return None
+    seasons = _TITLE_SEASON.findall(_clean(match["title"]))
+    return parse_season_years(seasons[-1]) if seasons else None
+
+
 def parse_page(
     page: str,
     *,
@@ -1012,7 +1115,10 @@ def parse_page(
         if grid_lines:
             return [], [f"{grid_lines} lines of a results grid or crosstable not read"]
         return [], []
-    parsed = parse_lines(competition, start_year, end_year)
+    # The years for the dates: the page title, if it has a season
+    # (decision 29). A page with many seasons has one title for all.
+    years = (None if anchor else title_years(page)) or (start_year, end_year)
+    parsed = parse_lines(competition, *years)
     problems = [f"not read: {line}" for line in parsed.unparsed]
     if parsed.grid_lines:
         problems.append(
@@ -1020,6 +1126,12 @@ def parse_page(
         )
     if parsed.two_leg_lines:
         problems.append(f"{parsed.two_leg_lines} lines of two-leg ties not read")
+    if parsed.year_jumps:
+        problems.append(
+            f"{parsed.year_jumps} dates more than 200 days before the date before"
+            " them: the season can be longer than 12 months, and some dates can"
+            " have a wrong year"
+        )
     matches = []
     for row, match_id in zip(parsed.rows, match_ids(parsed.rows, league_code, season)):
         try:
