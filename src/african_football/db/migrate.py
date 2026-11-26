@@ -115,6 +115,24 @@ def discover(folder: Path = MIGRATIONS_DIR) -> list[Migration]:
     return migrations
 
 
+def pending(conn: psycopg.Connection, folder: Path = MIGRATIONS_DIR) -> list[str]:
+    """Give the names of the migration files that the database does not have.
+
+    The function only reads: it does not make schema_migrations. A database
+    without the table has none of the migrations. main.py calls it before a
+    run, thus a database without a new table (for example source_tables of
+    002) stops the run with one message, and not with an SQL error in each
+    season (roadmap step 4, part 4).
+    """
+    exists = conn.execute("SELECT to_regclass('schema_migrations')").fetchone()
+    applied: set[str] = set()
+    if exists is not None and exists[0] is not None:
+        applied = {
+            row[0] for row in conn.execute("SELECT version FROM schema_migrations")
+        }
+    return [m.name for m in discover(folder) if m.version not in applied]
+
+
 def migrate(conn: psycopg.Connection, folder: Path = MIGRATIONS_DIR) -> list[str]:
     """Apply the new migrations in a folder to a database.
 

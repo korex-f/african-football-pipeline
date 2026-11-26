@@ -22,6 +22,7 @@ from african_football.db.migrate import (
     discover,
     main,
     migrate,
+    pending,
 )
 
 TABLES_OF_001 = {
@@ -266,3 +267,31 @@ def test_main_without_database_url_stops(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     with pytest.raises(SystemExit, match="DATABASE_URL"):
         main()
+
+
+# ---------------------------------------------------------------------------
+# pending (roadmap step 4, part 4)
+# ---------------------------------------------------------------------------
+
+
+def _pending(url: str, folder: Path) -> list[str]:
+    with psycopg.connect(url) as conn:
+        return pending(conn, folder)
+
+
+def test_pending_on_a_database_without_migrations(empty_database, tmp_path):
+    _write(tmp_path, "001_first.sql", "CREATE TABLE a (id int);")
+    _write(tmp_path, "002_second.sql", "CREATE TABLE b (id int);")
+    assert _pending(empty_database, tmp_path) == ["001_first.sql", "002_second.sql"]
+    # pending() only reads: it does not make schema_migrations.
+    assert "schema_migrations" not in _tables(empty_database)
+
+
+def test_pending_gives_only_the_new_files(empty_database, tmp_path):
+    # The database of the project had 001, and not 002 (November 2026).
+    _write(tmp_path, "001_first.sql", "CREATE TABLE a (id int);")
+    _migrate(empty_database, tmp_path)
+    _write(tmp_path, "002_second.sql", "CREATE TABLE b (id int);")
+    assert _pending(empty_database, tmp_path) == ["002_second.sql"]
+    _migrate(empty_database, tmp_path)
+    assert _pending(empty_database, tmp_path) == []

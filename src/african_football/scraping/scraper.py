@@ -1,13 +1,14 @@
 """
-scraper.py — Scrape one league season from Soccerway.
+scraper.py — Collect one league season from one source.
 
 FootballScraper is the entry point that main.py and the Airflow tasks use.
 Since version 1.1.0, it does not read the pages itself. It uses these parts:
 
-    1. SoccerwayAdapter.fetch: gets the pages into the raw store.
-    2. SoccerwayAdapter.parse: makes SourceMatch records from the stored pages.
-    3. RunRecorder.load:       writes the run, the pages and the matches to
-                               the pipeline database (db/loader.py).
+    1. adapter.fetch:          gets the pages into the raw store.
+    2. adapter.parse:          makes SourceMatch records from the stored pages.
+       adapter.parse_tables:   (RSSSF only) gives the rows of the final tables.
+    3. RunRecorder.load:       writes the run, the pages, the matches and the
+                               tables to the pipeline database (db/loader.py).
     4. read_season_matches:    reads the matches of the run back from the
                                database (db/reader.py).
     5. The legacy exporter:    makes the match dictionaries of the JSON files
@@ -17,7 +18,9 @@ Since roadmap step 3, part 3, the database is the single source of truth:
 the exports show what the database has. Thus the scraper needs a database
 URL.
 
-The output has the same format as before. The roadmap step 6 (Source
+The source is 'soccerway' (the default) or 'rsssf' (roadmap step 4, part
+4). The Soccerway adapter uses a browser; the RSSSF adapter does not. The
+output has the same format for both sources. The roadmap step 6 (Source
 Manager) will replace this class.
 
 Typical usage:
@@ -39,8 +42,10 @@ from african_football.db.reader import read_season_matches
 from african_football.exports.legacy import to_legacy_stages
 from african_football.models.league_model import LeagueConfig
 from african_football.models.season_model import SeasonRecord
+from african_football.models.source_table import SourceTableRow
 from african_football.sources.base import SourceAdapter
 from african_football.sources.raw_store import RawStore
+from african_football.sources.rsssf.adapter import RsssfAdapter
 from african_football.sources.soccerway.adapter import SoccerwayAdapter
 from african_football.utils.logger import PipelineLogger
 
@@ -49,19 +54,23 @@ PIPELINE_VERSION = "1.2.0"
 # The default folder of the raw store, relative to the working directory.
 DEFAULT_RAW_ROOT = Path("data/sources")
 
+# The sources that FootballScraper can use. The first is the default.
+SOURCES = ("soccerway", "rsssf")
+
 
 class FootballScraper:
     """
-    Scrape the match data of one league season from Soccerway.
+    Collect the match data of one league season from one source.
 
-    Use the class as an async context manager. The context manager starts
-    the browser of the adapter and makes sure that it stops.
+    Use the class as an async context manager. For Soccerway, the context
+    manager starts the browser of the adapter and makes sure that it stops.
 
     Attributes:
         league:   The league configuration.
         season:   The season. scrape() adds the post-scrape metadata.
         logger:   The pipeline logger.
-        headless: Run the browser without a window.
+        headless: Run the browser without a window (Soccerway only).
+        source:   'soccerway' or 'rsssf'.
         raw_root: The root folder of the raw store.
         database_url: The URL of the pipeline database. It is necessary.
                   The type is Optional because callers give
@@ -79,7 +88,11 @@ class FootballScraper:
         headless: bool = True,
         raw_root: Path = DEFAULT_RAW_ROOT,
         database_url: Optional[str] = None,
+        source: str = SOURCES[0],
     ) -> None:
+        if source not in SOURCES:
+            raise ValueError(f"Unknown source {source!r}; use one of {SOURCES}")
+        self.source = source
         self.league = league
         self.season = season
         self.logger = logger
@@ -93,7 +106,7 @@ class FootballScraper:
         self.database_url: str = database_url
         self.load_summary: Optional[LoadSummary] = None
         self._stack: Optional[AsyncExitStack] = None
-        self._adapter: Optional[SoccerwayAdapter] = None
+        self._adapter: Optional[SourceAdapter] = None
         self.stats: dict[str, Any] = {
             "total_matches": 0,
             "stages": [],
@@ -103,16 +116,24 @@ class FootballScraper:
             "missing_data": [],
         }
 
+    @property
+    def halftime(self) -> bool:
+        """True if the run collects halftime scores. RSSSF pages have none."""
+        return self.league.fetch_halftime and self.source == "soccerway"
+
     async def __aenter__(self) -> "FootballScraper":
-        """Start the browser of the adapter."""
+        """Make the adapter. For Soccerway, start its browser."""
         self._stack = AsyncExitStack()
-        self._adapter = await self._stack.enter_async_context(
-            SoccerwayAdapter(self.logger, self.headless)
-        )
+        if self.source == "rsssf":
+            self._adapter = RsssfAdapter(self.logger)
+        else:
+            self._adapter = await self._stack.enter_async_context(
+                SoccerwayAdapter(self.logger, self.headless)
+            )
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        """Stop the browser of the adapter."""
+        """Stop the browser of the adapter, if it has one."""
         if self._stack is not None:
             await self._stack.aclose()
 
@@ -139,14 +160,12 @@ class FootballScraper:
                 "Only COMPLETED seasons can be scraped."
             )
 
-        # The type checker compares SoccerwayAdapter with the SourceAdapter
-        # Protocol at this line.
-        source: SourceAdapter = self._adapter
+        source = self._adapter
 
         self.logger.log(f"Scraping {self.season.season} — {self.league.name}")
+        self.logger.log(f"Source: {source.name}")
         self.logger.log(
-            f"Halftime scores: "
-            f"{'Enabled' if self.league.fetch_halftime else 'Disabled'}"
+            f"Halftime scores: {'Enabled' if self.halftime else 'Disabled'}"
         )
 
         store = RawStore(
@@ -164,7 +183,13 @@ class FootballScraper:
             try:
                 documents = await source.fetch(self.league, self.season, store)
                 parsed = source.parse(self.league, self.season, documents, store)
-                self.load_summary = recorder.load(documents, parsed)
+                tables: list[SourceTableRow] = []
+                if isinstance(source, RsssfAdapter):
+                    # The final tables (decision 23): only RSSSF has them.
+                    tables = source.parse_tables(
+                        self.league, self.season, documents, store
+                    )
+                self.load_summary = recorder.load(documents, parsed, tables)
             except BaseException as error:
                 self._record_failure(recorder, error)
                 raise
@@ -187,8 +212,9 @@ class FootballScraper:
             )
 
         all_matches = [m for stage in stages_data for m in stage["matches"]]
-        self.stats["network_errors"] = self._adapter.network_errors
-        if self.league.fetch_halftime:
+        # Only the Soccerway adapter counts its network errors.
+        self.stats["network_errors"] = getattr(source, "network_errors", 0)
+        if self.halftime:
             self._halftime_statistics(stages_data, len(all_matches))
 
         self.validate_data(all_matches)
@@ -285,7 +311,8 @@ class FootballScraper:
             "end_year": self.season.end_year,
             "champion": self.season.champion,
             "total_matches": len(all_matches),
-            "has_halftime_scores": self.league.fetch_halftime,
+            "has_halftime_scores": self.halftime,
+            "source": self.source,
             "stages": stages_data,
             "scraped_at": datetime.now().isoformat(),
             "pipeline_version": PIPELINE_VERSION,
@@ -356,7 +383,7 @@ class FootballScraper:
                 f"  - {s['name']}: {s['matches']} matches" for s in self.stats["stages"]
             )
 
-        if self.league.fetch_halftime:
+        if self.halftime:
             total = self.stats["total_matches"]
             found = self.stats["ht_scores_found"]
             pct = found / total * 100 if total > 0 else 0

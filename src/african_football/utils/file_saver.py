@@ -72,11 +72,25 @@ def _compute_checksum(data: dict) -> str:
     return hashlib.sha256(serialised.encode("utf-8")).hexdigest()
 
 
+def _source_dir(league: LeagueConfig, base_dir: str | Path, source: str) -> Path:
+    """
+    Give the folder of the files of a league and a source.
+
+    The Soccerway files stay in {base_dir}/{country}/{league_code}/, as
+    before. The files of another source are in a subfolder with the source
+    name ({base_dir}/{country}/{league_code}/rsssf/). Thus an RSSSF run does
+    not replace the Soccerway file of the same season.
+    """
+    folder = Path(base_dir) / league.country / league.code
+    return folder if source == "soccerway" else folder / source
+
+
 def _build_json_path(
     league: LeagueConfig,
     start_year: int,
     end_year: int,
     base_dir: str | Path = "data/raw",
+    source: str = "soccerway",
 ) -> Path:
     """
     Build the output path for a raw JSON file.
@@ -86,12 +100,14 @@ def _build_json_path(
         start_year: The year the season starts.
         end_year:   The year the season ends.
         base_dir:   Root directory for raw data. Defaults to 'data/raw'.
+        source:     The source of the data. A source other than 'soccerway'
+                    has its own subfolder.
 
     Returns:
         A Path object for the JSON output file.
     """
     season_str = build_season_str(start_year, end_year)
-    return Path(base_dir) / league.country / league.code / f"{season_str}.json"
+    return _source_dir(league, base_dir, source) / f"{season_str}.json"
 
 
 def _build_txt_path(
@@ -99,6 +115,7 @@ def _build_txt_path(
     start_year: int,
     end_year: int,
     base_dir: str | Path = "data/exports",
+    source: str = "soccerway",
 ) -> Path:
     """
     Build the output path for a TXT export file.
@@ -108,6 +125,8 @@ def _build_txt_path(
         start_year: The year the season starts.
         end_year:   The year the season ends.
         base_dir:   Root directory for exports. Defaults to 'data/exports'.
+        source:     The source of the data. A source other than 'soccerway'
+                    has its own subfolder.
 
     Returns:
         A Path object for the TXT output file.
@@ -118,7 +137,7 @@ def _build_txt_path(
         if league.submission_code
         else f"{season_str}.txt"
     )
-    return Path(base_dir) / league.country / league.code / filename
+    return _source_dir(league, base_dir, source) / filename
 
 
 def save_json(
@@ -127,6 +146,7 @@ def save_json(
     start_year: int,
     end_year: int,
     base_dir: str | Path = "data/raw",
+    source: str = "soccerway",
 ) -> Path:
     """
     Save scraped match data as a raw JSON file with checksum metadata.
@@ -142,11 +162,13 @@ def save_json(
         start_year: The year the season starts.
         end_year:   The year the season ends.
         base_dir:   Root directory for raw data. Defaults to 'data/raw'.
+        source:     The source of the data. A source other than 'soccerway'
+                    has its own subfolder.
 
     Returns:
         The Path where the JSON file was written.
     """
-    output_path = _build_json_path(league, start_year, end_year, base_dir)
+    output_path = _build_json_path(league, start_year, end_year, base_dir, source)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     data_copy = data.copy()
@@ -181,6 +203,7 @@ def save_txt(
     start_year: int,
     end_year: int,
     base_dir: str | Path = "data/exports",
+    source: str = "soccerway",
 ) -> Path:
     """
     Save scraped match data as a human-readable TXT export.
@@ -196,11 +219,13 @@ def save_txt(
         start_year: The year the season starts.
         end_year:   The year the season ends.
         base_dir:   Root directory for exports. Defaults to 'data/exports'.
+        source:     The source of the data. A source other than 'soccerway'
+                    has its own subfolder.
 
     Returns:
         The Path where the TXT file was written.
     """
-    output_path = _build_txt_path(league, start_year, end_year, base_dir)
+    output_path = _build_txt_path(league, start_year, end_year, base_dir, source)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     all_matches = [m for s in data["stages"] for m in s["matches"]]
