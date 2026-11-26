@@ -38,6 +38,8 @@ def _entries(name: str, section: str = ""):
         ("1999/00", (1999, 2000)),
         ("2009/10", (2009, 2010)),
         ("2023/2024", (2023, 2024)),
+        # Decision 28: '-' in place of '/' (Lesotho).
+        ("2021-22", (2021, 2022)),
         (" 1972 ", (1972, 1972)),
     ],
 )
@@ -45,7 +47,12 @@ def test_season_years(label, years):
     assert parse_season_years(label) == years
 
 
-@pytest.mark.parametrize("label", ["1999/01", "2021/2023", "1931-1945", "Final", ""])
+@pytest.mark.parametrize(
+    "label",
+    # '1966-68' covers two seasons (Libya); '1974,1' is a part of a year;
+    # '1990/00' is a typo for 1999/00 (Cape Verde).
+    ["1999/01", "2021/2023", "1931-1945", "1966-68", "1974,1", "1990/00", "Final", ""],
+)
 def test_not_a_season(label):
     assert parse_season_years(label) is None
 
@@ -158,3 +165,63 @@ def test_section_comparison_ignores_case_and_spaces():
 
 def test_unknown_section_gives_no_entries():
     assert _entries("egychamp.html", "Premier League") == []
+
+
+# ---------------------------------------------------------------------------
+# Line forms of other countries (decision 28)
+# ---------------------------------------------------------------------------
+
+
+def test_congo_row_numbers_before_the_links():
+    # ' 1 <a href="kong79.html">1979</a>  Etoile du Congo ...' to '14 ...'.
+    entries = [e for e in _entries("kongchamp.html") if 1979 <= e.start_year <= 1994]
+    assert len(entries) == 14
+    assert (entries[0].href, entries[0].label) == ("kong79.html", "1979")
+    assert (entries[-1].href, entries[-1].champion) == (
+        "kong94.html",
+        "abandoned due to civil war",
+    )
+
+
+def test_south_africa_column_label_before_the_heading():
+    # 'year    <b>PSL</b>': the 30 PSL seasons are in their own section.
+    psl = _entries("zafchamp.html", "PSL")
+    assert len(psl) == 30
+    assert (psl[0].label, psl[-1].label) == ("1996/97", "2025/26")
+
+
+def test_south_africa_line_in_italics():
+    # '<i><a href="zaf96.html">1996</a>    Kaizer Chiefs  [transitional ...]</i>'
+    [entry] = _entries("zafchamp.html", "Coca Cola Challenge")
+    assert (entry.href, entry.label, entry.champion) == (
+        "zaf96.html",
+        "1996",
+        "Kaizer Chiefs",
+    )
+
+
+@pytest.mark.parametrize(
+    ("line", "label"),
+    [
+        (' 1 <a href="kong79.html">1979</a>  Etoile du Congo', "1979"),
+        ('14. <a href="x94.html">1994</a>  Club', "1994"),
+        ('<i><a href="soed2024.html">2024</a>   Al-Hilal</i>', "2024"),
+        ('<a href="leso2021.html">2021-22</a> Matlama FC (Maseru)', "2021-22"),
+    ],
+)
+def test_season_line_forms(line, label):
+    [entry] = parse_index(f"<pre>\n{line}\n</pre>")
+    assert entry.label == label
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # A link in a sentence is not a season line.
+        'additional information on <a href="nig31.html">1931-1945</a>;',
+        'e.g. in <a href="burkf57.html">1956/57</a>.',
+        '[*4] <a href="https://example.org/">around 1942</a>',
+    ],
+)
+def test_links_in_text_are_not_season_lines(line):
+    assert parse_index(f"<pre>\n{line}\n</pre>") == []

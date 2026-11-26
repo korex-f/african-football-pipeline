@@ -321,3 +321,11 @@ The lesson: a test of completeness must be tested on tables that are not complet
 **Why:** A row of numbers does not say which number is which. A wrong order gives a row that looks correct but is wrong. The model `SourceTableRow` checks that won + drawn + lost is played. A row read in a wrong order almost never passes this check, thus it becomes a problem and not a wrong row.
 
 **How:** The forms share their parts (`_POSITION_TEAM`, `_POINTS_NOTE`) and their group names, thus one function makes the row from any of them. The main form is first: a new form can only add rows that the main form did not read. The comparison of all survey seasons confirmed it: no season has fewer rows.
+
+## 27. Find what a reader misses: compare with a wider search
+
+**What:** To find the season lines that `parse_index()` did not read, a script searched each list of champions for every link with a year in its text, and compared these links with the entries ([decision 28](../../../../docs/decisions/0028-index-line-forms.md)).
+
+**Why:** A reader with a strict rule gives no problem for a line that it does not read: the line is silently not there. The test of a strict rule is a wide search. The wide search finds too much (links in sentences), but the difference between the two shows each form that the strict rule misses.
+
+**How:** The script put each missed link in a class by the text before the link and by its label. 33 of 2,762 links were missed: 18 with a row number, 3 with `2021-22`, 3 in italics, and some links in sentences. The rules changed only for the real forms. After the change, 11 links are missed, and each has a reason.

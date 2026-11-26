@@ -9,6 +9,8 @@ The licence of each page: "You are free to copy this document in whole or part p
 | `nigchamp.html` | https://www.rsssf.org/tablesn/nigchamp.html | Djidenou Medjigbodo and RSSSF | 16 Aug 2026 | 24 Nov 2026 |
 | `ghachamp.html` | https://www.rsssf.org/tablesg/ghachamp.html | Karel Stokkermans and RSSSF | 18 May 2026 | 24 Nov 2026 |
 | `egychamp.html` | https://www.rsssf.org/tablese/egychamp.html | Ahmed El-Gammal, Amro Hassanin, Tarek Said and RSSSF | 16 Jul 2026 | 24 Nov 2026 |
+| `kongchamp.html` | https://www.rsssf.org/tablesk/kongchamp.html | Julio Bovi Diogo, Hans Schöggl and RSSSF | 26 May 2026 | 25 Nov 2026 |
+| `zafchamp.html` | https://www.rsssf.org/tablesz/zafchamp.html | Hans Schöggl, Neil Morrison, Ian King, Mikael Jönsson and RSSSF | 16 Jul 2026 | 25 Nov 2026 |
 
 ## Season pages (`seasons/`)
 
