@@ -38,17 +38,23 @@ _BLOCK = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# A heading line in a <pre> block: <b>Lagos League</b>
-_BOLD_LINE = re.compile(r"^\s*<b>(?P<text>.*?)</b>\s*$", re.IGNORECASE)
+# A heading line in a <pre> block: <b>Lagos League</b>. The label of the
+# first column can come before it: 'year    <b>PSL</b>' (South Africa,
+# decision 28).
+_BOLD_LINE = re.compile(r"^\s*(?:year\s+)?<b>(?P<text>.*?)</b>\s*$", re.IGNORECASE)
 
 # A season line: <a href="nig2022.html">2021/22</a> Rivers United (Port Harcourt)
+# Before the link, a line can have a row number (' 1 <a href=...', Congo)
+# or the start of italics ('<i><a href=...', Sudan) (decision 28).
 _SEASON_LINE = re.compile(
-    r'^\s*<a\s+href="(?P<href>[^"]+)"\s*>(?P<label>[^<]*)</a>(?P<rest>.*)$',
+    r"^\s*(?:\d{1,3}\.?\s+)?(?:<i>\s*)?"
+    r'<a\s+href="(?P<href>[^"]+)"\s*>(?P<label>[^<]*)</a>(?P<rest>.*)$',
     re.IGNORECASE,
 )
 
-# The season text: 2015, 2021/22, 1999/00 or 2023/2024.
-_LABEL = re.compile(r"^(?P<start>\d{4})(?:/(?P<end>\d{2}|\d{4}))?$")
+# The season text: 2015, 2021/22, 1999/00, 2023/2024, or with '-' in place
+# of '/' (2021-22, Lesotho; decision 28).
+_LABEL = re.compile(r"^(?P<start>\d{4})(?:[/-](?P<end>\d{2}|\d{4}))?$")
 
 _TAG = re.compile(r"<[^>]+>")
 _NOTE = re.compile(r"\s*\[[^\]]*\]")
@@ -81,7 +87,8 @@ class IndexEntry:
 def parse_season_years(label: str) -> Optional[tuple[int, int]]:
     """Give the start year and the end year of an RSSSF season text.
 
-    '2015' gives (2015, 2015). '2021/22' gives (2021, 2022). '1999/00' gives
+    '2015' gives (2015, 2015). '2021/22' and '2021-22' give (2021, 2022).
+    '1999/00' gives
     (1999, 2000): the end year is the next year, also across a century.
     Text that is not a season, or a season longer than one year change
     ('1999/01'), gives None.
