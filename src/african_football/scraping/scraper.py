@@ -58,6 +58,18 @@ DEFAULT_RAW_ROOT = Path("data/sources")
 SOURCES = ("soccerway", "rsssf")
 
 
+def _is_missing(value: Any) -> bool:
+    """Give True if a field of a match has no value.
+
+    A value is missing if it is None, or if it is text that is empty or
+    that has only spaces. A score of 0 is a value.
+
+    isinstance() comes before strip(). 'and' stops at the first False, thus
+    strip() does not run on a number.
+    """
+    return value is None or (isinstance(value, str) and value.strip() == "")
+
+
 class FootballScraper:
     """
     Collect the match data of one league season from one source.
@@ -341,7 +353,7 @@ class FootballScraper:
         ]
 
         for i, m in enumerate(matches, 1):
-            issues = [f for f in required_fields if not m.get(f)]
+            issues = [f for f in required_fields if _is_missing(m.get(f))]
             if issues:
                 info = {
                     "match_index": i,
