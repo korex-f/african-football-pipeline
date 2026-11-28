@@ -2,6 +2,21 @@
 
 Each entry records what changed, why, how, the verification and the trade-offs. The newest entry is first.
 
+## November 2026: A score of 0 is not a missing value
+
+**What happened:** `FootballScraper.validate_data()` does not report a score of 0 as a missing value. A new helper, `_is_missing()`, decides if a field has no value.
+
+**Why it was necessary:** The check used `not m.get(field)`. In Python, `not 0` is True, thus a score of 0 was a missing value. Today the exports give each score as text (`"0"`), and `not "0"` is False. Thus no match was reported: on the stored NPFL pages, 5,443 of 8,466 matches have a score of 0, and none was reported. The error was hidden: a source that gives the scores as numbers makes it active.
+
+**How the project did it:** `_is_missing()` gives True for None and for text that is empty or that has only spaces. `validate_data()` gives it the value of each field (`m.get(field)`), not the name of the field.
+
+**Verification:**
+
+1. Five tests in `tests/unit/test_validate_data.py`, written before the change. The test with a score as the number 0 failed before the change. Two tests make sure that a value that is really missing (None, empty text) is still reported.
+2. The two wrong versions were tested: the old check fails the test of the number 0, and a check of the field name fails the two tests of missing values.
+
+**Trade-offs:** A match that was not played (postponed, cancelled) has no score, and `validate_data()` reports it as missing data (65 NPFL matches). The next change decides how `validate_data()` knows that a match was not played.
+
 ## November 2026: RSSSF in the pipeline (roadmap step 4, part 4)
 
 **What happened:** `main.py --source rsssf` runs the pipeline with RSSSF: discovery, pages, matches, final tables, database, files. The RSSSF files are in a subfolder `rsssf/`. `main.py` stops before the menus if the database does not have all the migrations. The RSSSF client waits longer before its retries. Roadmap step 4 is done.
